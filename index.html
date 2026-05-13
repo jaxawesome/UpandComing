@@ -431,6 +431,15 @@
                 if (EXCLUDED_GAME_SLUGS.has(g.slug)) return;
 
                 const normTitle = normalizeTitle(g.name);
+                if (EXCLUDED_GAME_TITLES.has(normTitle)) return;
+
+                // Filter out placeholder/junk entries
+                const titleLower = (g.name || '').toLowerCase();
+                const isJunk = !g.name || g.name.trim().length < 3 ||
+                               /^(untitled|unknown|placeholder|tbd|tba|test)\b/.test(titleLower) ||
+                               titleLower.includes('untitled ') || titleLower.includes('unknown ');
+                if (isJunk) return;
+
                 const isDupTitle = seenGameTitles.has(normTitle);
 
                 if (!seenGameIds.has(g.id) && !isDupTitle) {
