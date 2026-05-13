@@ -1,5 +1,4 @@
 <style>
-body, html { margin: 0; padding: 0; }
     :root {
         --card-bg: #1c1c24;
         --text-main: #ffffff;
@@ -613,27 +612,56 @@ body, html { margin: 0; padding: 0; }
                 const tags = detail.tags?.map(t => t.slug) || [];
                 const tagNames = detail.tags?.map(t => t.name?.toLowerCase()) || [];
                 
-                const KNOWN_REBOOTS = ['fable', 'tomb raider', 'prince of persia', 'alone in the dark', 'alone in dark', 'perfect dark', 'gothic', 'black flag'];
+                // Titles that are reboots/remakes regardless of what other signals say
+                const KNOWN_REBOOTS = [
+                    'fable', 'tomb raider', 'prince of persia', 'alone in the dark', 'alone in dark',
+                    'perfect dark', 'gothic', 'black flag resynced', 'assassins creed black flag',
+                    'black flag', 'silent hill 2', 'dead space', 'system shock', 'star wars battlefront'
+                ];
+                const KNOWN_REMAKES = [
+                    'remake', 'remaster', 'resynced', 'definitive edition', 'hd edition',
+                    'complete edition', 'anniversary edition', 'origins'
+                ];
                 const KNOWN_SERIES_FALLBACK = [
                     'life is strange', 'grand theft auto', 'resident evil', 'monster hunter', 
                     'dragon age', 'final fantasy', 'persona', 'assassins creed', 'halo', 
                     'gears of war', 'god of war', 'call of duty', 'super mario', 'legend of zelda', 
                     'pokemon', 'mafia', 'civilization', 'borderlands', 'witcher', 'cyberpunk', 'fallout',
-                    'lords of the fallen', 'control resonant'
+                    'lords of the fallen', 'control resonant', 'far cry', 'batman arkham',
+                    'mass effect', 'bioshock', 'dishonored', 'deus ex', 'metro', 'dying light',
+                    'dead rising', 'devil may cry', 'yakuza', 'like a dragon', 'street fighter',
+                    'mortal kombat', 'tekken', 'dark souls', 'elden ring', 'sekiro', 'bloodborne',
+                    'spider-man', 'spiderman', 'batman', 'lego', 'star wars', 'marvel'
                 ];
 
                 const gameTitleLower = (detail.name || '').toLowerCase();
-                const titleForSeriesCheck = gameTitleLower.replace(/[^a-z0-9 ]/g, ''); 
+                const titleForSeriesCheck = gameTitleLower.replace(/[^a-z0-9 ]/g, '');
 
-                const isKnownReboot = KNOWN_REBOOTS.some(r => gameTitleLower.startsWith(r));
-                const hasRebootTag = tags.some(t => t.includes('reboot') || t.includes('reimagin')) || tagNames.some(t => t.includes('reboot') || t.includes('reimagin'));
-                const hasRemakeTag = tags.some(t => t.includes('remake') || t.includes('remaster')) || tagNames.some(t => t.includes('remake') || t.includes('remaster'));
-                const isKnownSeries = KNOWN_SERIES_FALLBACK.some(prefix => titleForSeriesCheck.includes(prefix.replace(/[^a-z0-9 ]/g, '')));
+                // Check tags from RAWG
+                const hasRebootTag = tags.some(t => t.includes('reboot') || t.includes('reimagin')) || 
+                                     tagNames.some(t => t.includes('reboot') || t.includes('reimagin'));
+                const hasRemakeTag = tags.some(t => t.includes('remake') || t.includes('remaster')) || 
+                                     tagNames.some(t => t.includes('remake') || t.includes('remaster'));
 
-                if (hasRebootTag || isKnownReboot) document.getElementById('m-lineage').innerText = "Reboot";
-                else if (hasRemakeTag) document.getElementById('m-lineage').innerText = "Remake / Remaster";
-                else if (tags.includes('sequel') || detail.series_count > 0 || isKnownSeries) document.getElementById('m-lineage').innerText = "Sequel / Part of a Series";
-                else document.getElementById('m-lineage').innerText = "Original / Standalone";
+                // Check title keywords for remake signals
+                const titleHasRemakeWord = KNOWN_REMAKES.some(w => gameTitleLower.includes(w));
+
+                // Check known reboot list — use includes() not startsWith() so subtitles work
+                const isKnownReboot = KNOWN_REBOOTS.some(r => gameTitleLower.includes(r));
+
+                // Check series list
+                const isKnownSeries = KNOWN_SERIES_FALLBACK.some(s => titleForSeriesCheck.includes(s.replace(/[^a-z0-9 ]/g, '')));
+
+                // Reboots beat everything; title-keyword remakes beat sequel tag; series is last resort
+                if (hasRebootTag || isKnownReboot) {
+                    document.getElementById('m-lineage').innerText = "Reboot";
+                } else if (hasRemakeTag || titleHasRemakeWord) {
+                    document.getElementById('m-lineage').innerText = "Remake / Remaster";
+                } else if (tags.includes('sequel') || detail.series_count > 0 || isKnownSeries) {
+                    document.getElementById('m-lineage').innerText = "Sequel / Part of a Series";
+                } else {
+                    document.getElementById('m-lineage').innerText = "Original / Standalone";
+                }
 
                 const releaseDate = item.date !== 'TBA' ? item.date : null;
                 let delayText = '';
