@@ -441,17 +441,47 @@
                 if (isJunk) return;
 
                 const isDupTitle = seenGameTitles.has(normTitle);
+                            if (item.tba || !releaseDate) {
+                    delayText = `📅 Release date is still TBA — no official date confirmed yet.`;
+                } else {
+                    const parts = releaseDate.split('-');
+                    let releaseDateObj = new Date(releaseDate);
+                    if(parts.length === 3) {
+                        releaseDateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                    }
+                    
+                    const today = new Date();
+                    today.setHours(0,0,0,0); 
 
-                if (!seenGameIds.has(g.id) && !isDupTitle) {
-                    seenGameIds.add(g.id);
-                    seenGameTitles.add(normTitle);
-                    dedupedGames.push(g);
+                    if (releaseDateObj > today) {
+                        const formattedDate = formatSafeDate(releaseDate);
+                        
+                        // --- NEW: DELAY SCANNING LOGIC ---
+                        const desc = (detail.description_raw || '').toLowerCase();
+                        const delayKeywords = ['delay', 'postponed', 'pushed back', 'rescheduled'];
+                        const hasKeywords = delayKeywords.some(kw => desc.includes(kw));
+                        
+                        const updatedDate = detail.updated ? new Date(detail.updated) : null;
+                        const updatedAgo = updatedDate ? Math.floor((today - updatedDate) / (1000 * 60 * 60 * 24)) : 999;
+                        const isVibeCheckAlert = updatedAgo <= 5; // Updated within the last 5 days
+
+                        if (hasKeywords && isVibeCheckAlert) {
+                            delayText = `🚨 Potential Delay — Recent keywords and database updates detected. Date: ${formattedDate}.`;
+                        } else if (hasKeywords || isVibeCheckAlert) {
+                            delayText = `🟡 Under Review — Recent update or delay mentions found. Date: ${formattedDate}.`;
+                        } else {
+                            delayText = `🟢 On track — confirmed release date: ${formattedDate}.`;
+                        }
+
+                        if (detail.updated && updatedAgo <= 30) {
+                            delayText += ` (Listing updated ${updatedAgo} day${updatedAgo === 1 ? '' : 's'} ago.)`;
+                        }
+                        // --- END NEW LOGIC ---
+                    } else {
+                        const formattedDate = formatSafeDate(releaseDate);
+                        delayText = `✅ Already released on ${formattedDate}. No delays recorded.`;
+                    }
                 }
-            });
-
-            const liveGames = dedupedGames.map(item => {
-                let finalDate = item.released || 'TBA';
-                if (item.tba) finalDate = 'TBA'; 
 
                 const isReleased = determineStatus(finalDate) === 'Released';
                 let bestScore = null;
