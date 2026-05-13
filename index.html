@@ -321,7 +321,14 @@
                     if (tvD.next_episode_to_air?.air_date) {
                         rDate = tvD.next_episode_to_air.air_date;
                     } else if (tvD.last_episode_to_air?.air_date) {
-                        rDate = tvD.last_episode_to_air.air_date;
+                        const lastAir = new Date(tvD.last_episode_to_air.air_date);
+                        const ninetyDaysAgo = new Date();
+                        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+                        if (lastAir >= ninetyDaysAgo) {
+                            rDate = tvD.last_episode_to_air.air_date;
+                        } else {
+                            rDate = tvD.first_air_date || item.first_air_date || 'TBA';
+                        }
                     }
                     const seasons = (tvD.seasons || []).filter(s => s.season_number > 0).length;
                     isReturning = seasons > 1;
@@ -374,6 +381,19 @@
         document.getElementById('m-title').innerText = item.title;
         document.getElementById('m-desc').innerHTML = '<span class="loader-inline">Syncing live data...</span>';
         
+        // --- RESTORE INITIAL DOM POPULATION ---
+        document.getElementById('m-type').innerText = item.type.toUpperCase();
+        document.getElementById('m-date').innerText = formatSafeDate(item.date);
+        document.getElementById('m-perf').innerText = item.perf;
+        document.getElementById('m-creator-label').innerText = 'Studio/Creator';
+        document.getElementById('m-creator').innerHTML = '<span class="loader-inline">Loading...</span>';
+        document.getElementById('m-platcast-title').innerText = "Platforms / Cast";
+        document.getElementById('m-platcast-text').innerHTML = '<span class="loader-inline">Fetching...</span>';
+        document.getElementById('m-lineage').innerHTML = '<span class="loader-inline">Scanning...</span>';
+        document.getElementById('m-delays').innerText = "Checking status...";
+        document.getElementById('m-subtitle').innerText = "Genres loading...";
+        // --------------------------------------
+
         // Locks body scrolling
         document.body.classList.add('modal-open');
         overlay.classList.add('active');
@@ -420,7 +440,9 @@
                 document.getElementById('m-delays').innerText = dStatus + (updatedAgo <= 30 ? ` (Updated ${updatedAgo} days ago)` : "");
                 document.getElementById('m-subtitle').innerText = detail.genres?.map(g => g.name).join(', ') || 'Various';
                 document.getElementById('m-desc').innerText = detail.description_raw || "No description provided.";
+                document.getElementById('m-creator-label').innerText = "Developer";
                 document.getElementById('m-creator').innerText = detail.developers?.[0]?.name || "Unknown";
+                document.getElementById('m-platcast-title').innerText = "Platforms";
                 document.getElementById('m-platcast-text').innerText = detail.platforms?.map(p => p.platform.name).join(', ') || "N/A";
                 
                 const logVal = detail.added > 0 ? Math.log10(detail.added) : 0;
@@ -430,23 +452,75 @@
                 const res = await fetch(`https://api.themoviedb.org/3/${item.tmdb_api_type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`);
                 detail = await res.json();
 
+                let liveDate = item.date;
+                if (item.tmdb_api_type === 'tv') {
+                    if (detail.next_episode_to_air?.air_date) {
+                        liveDate = detail.next_episode_to_air.air_date;
+                    } else if (detail.last_episode_to_air?.air_date) {
+                        const lastAir = new Date(detail.last_episode_to_air.air_date);
+                        const ninetyDaysAgo = new Date();
+                        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+                        if (lastAir >= ninetyDaysAgo) {
+                            liveDate = detail.last_episode_to_air.air_date;
+                        } else {
+                            liveDate = detail.first_air_date || item.date;
+                        }
+                    }
+                } else {
+                    liveDate = detail.release_date || item.date;
+                }
+
+                if (liveDate) {
+                    document.getElementById('m-date').innerText = formatSafeDate(liveDate);
+                    
+                    const actualStatus = determineStatus(liveDate); // Calculates if the *active* date is Upcoming or Released
+                    const dbItem = database.find(i => i.id === item.id && i.type === item.type);
+                    if (dbItem) {
+                        dbItem.date = liveDate;
+                        dbItem.status = actualStatus;
+                    }
+
+                    const cards = document.querySelectorAll('.card');
+                    for (let card of cards) {
+                        const titleEl = card.querySelector('.card-title');
+                        if (titleEl && titleEl.innerText === item.title) {
+                            const meta = card.querySelector('.card-meta');
+                            const badge = card.querySelector('.status-badge');
+                            if (meta) meta.innerHTML = `${item.type.toUpperCase()} &middot; ${liveDate}`;
+                            if (badge) {
+                                badge.innerText = actualStatus;
+                                badge.className = `status-badge ${actualStatus === 'Released' ? 'badge-released' : 'badge-upcoming'}`;
+                            }
+                            break;
+                        }
+                    }
+                }
+
                 document.getElementById('m-subtitle').innerText = detail.genres?.map(g => g.name).join(', ') || 'Various';
                 document.getElementById('m-desc').innerText = detail.overview || "No synopsis.";
+                document.getElementById('m-creator-label').innerText = item.tmdb_api_type === 'movie' ? 'Director/Studio' : 'Creator/Network';
                 document.getElementById('m-creator').innerText = item.tmdb_api_type === 'movie' ? (detail.credits?.crew?.find(c => c.job === 'Director')?.name || detail.production_companies?.[0]?.name) : (detail.created_by?.[0]?.name || detail.networks?.[0]?.name);
                 document.getElementById('m-lineage').innerText = item.tmdb_api_type === 'tv' ? (detail.number_of_seasons > 1 ? "Returning Series" : "New Series") : (detail.belongs_to_collection ? "Part of a Franchise" : "Standalone Film");
+                
+                document.getElementById('m-platcast-title').innerText = "Lead Cast";
+                document.getElementById('m-platcast-text').innerText = detail.credits?.cast?.slice(0, 5).map(c => c.name).join(', ') || "TBA";
                 
                 const pop = detail.popularity || 0;
                 const pctPop = Math.min((Math.log10(pop) / Math.log10(5000)) * 100, 100).toFixed(1) + '%';
                 document.getElementById('m-hype-bar').setAttribute('data-width', pctPop);
                 
+                const tmdbStatus = detail.status;
                 const activeDate = document.getElementById('m-date').innerText;
-                const rDateParts = activeDate?.split('-');
+                const statusEmoji = { 'Released': '✅', 'In Production': '🎬', 'Post Production': '✂️', 'Planned': '📋', 'Returning Series': '📺', 'Ended': '🏁' };
+                const emoji = statusEmoji[tmdbStatus] || '📅';
+
+                const rDateParts = liveDate?.split('-');
                 let effectiveDate = rDateParts?.length === 3 ? new Date(rDateParts[0], rDateParts[1]-1, rDateParts[2]) : null;
 
                 if (effectiveDate && effectiveDate > today) {
-                    document.getElementById('m-delays').innerText = `🟢 Upcoming — Confirmed date: ${formatSafeDate(activeDate)}.`;
+                    document.getElementById('m-delays').innerText = `🟢 Upcoming — Confirmed date: ${activeDate}.`;
                 } else {
-                    document.getElementById('m-delays').innerText = `✅ Released — Available as of ${formatSafeDate(activeDate)}.`;
+                    document.getElementById('m-delays').innerText = `✅ Released — Available as of ${activeDate}.`;
                 }
             }
         } catch (e) { console.error(e); }
@@ -512,4 +586,5 @@
 
     loadLiveEntertainmentData();
 </script>
+
 
