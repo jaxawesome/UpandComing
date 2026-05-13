@@ -1,5 +1,8 @@
 <style>
     body, html { margin: 0; padding: 0; }
+    
+    /* Locks the page from scrolling when modal is open */
+    body.modal-open { overflow: hidden; }
 
     :root {
         --card-bg: #1c1c24;
@@ -11,8 +14,6 @@
         --hype-gradient: linear-gradient(90deg, #fdcb6e, #ff7675);
     }
 
-    #uac-wrapper.modal-open { overflow: hidden; }
-
     #uac-wrapper {
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
         color: var(--text-main); margin: 0; padding: 2rem; min-height: 100vh;
@@ -20,7 +21,6 @@
         background-color: #0f0f13;
     }
 
-    /* CHANGED absolute to fixed so the gradient stays vibrant regardless of scroll height */
     #uac-wrapper::before {
         content: ""; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -2;
         background: linear-gradient(-45deg, #0f0f13, #1a1025, #0a1118, #151522);
@@ -253,7 +253,7 @@
         }
         const today = new Date();
         today.setHours(0, 0, 0, 0); 
-        return releaseDate <= today ? 'Released' : 'Upcoming';
+        return releaseDate > today ? 'Upcoming' : 'Released';
     }
 
     async function loadLiveEntertainmentData() {
@@ -264,7 +264,6 @@
             const twoWeeksAgoFormatted = twoWeeksAgo.toISOString().split('T')[0];
             const nextYear = today.getFullYear() + 2;
 
-            // FETCH PAGES: Staggered for safety
             const moviePages = [];
             for(let i = 1; i <= 4; i++) {
                 const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${twoWeeksAgoFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}`).then(r => r.json());
@@ -282,7 +281,6 @@
             const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc`).then(res => res.json());
             const rawgUpcomingData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${today.toISOString().split('T')[0]},${nextYear}-12-31&ordering=-added&page_size=40`).then(res => res.json());
 
-            // FETCH TOP TV DETAILS
             const airingCheckIds = [
                 ...(tvPages[0].results || []).slice(0, 20),
                 ...(tvPages[1]?.results || []).slice(0, 10)
@@ -307,9 +305,7 @@
                 seenIds.add(item.id);
                 return true;
             }).map(item => {
-                // FIXED: Establish the actual debut date separate from the display date
-                const debutDate = item.release_date || item.first_air_date || 'TBA';
-                let rDate = debutDate; 
+                let rDate = item.release_date || item.first_air_date || 'TBA';
                 let isReturning = false;
                 
                 if (item._tmdb_type === 'tv' && tvDetailsMap[item.id]) {
@@ -329,9 +325,8 @@
                 return {
                     id: item.id, type: mediaType, tmdb_api_type: item._tmdb_type,
                     showCategory: isReturning ? 'returning' : 'original',
-                    title: item.title || item.name, 
-                    date: rDate, // This displays the next episode
-                    status: determineStatus(debutDate), // This evaluates Released vs Upcoming based on its original debut!
+                    title: item.title || item.name, date: rDate,
+                    status: determineStatus(rDate), // evaluates active/live date instead of debut date
                     perf: item.vote_average ? `${(item.vote_average * 10).toFixed(0)}% Score` : 'TBD',
                     image: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : FALLBACK_IMG
                 };
@@ -369,8 +364,10 @@
         switchTab('overview', document.querySelector('.modal-tabs .tab-btn'));
         document.getElementById('m-title').innerText = item.title;
         document.getElementById('m-desc').innerHTML = '<span class="loader-inline">Syncing live data...</span>';
+        
+        // Locks background scroll
+        document.body.classList.add('modal-open');
         overlay.classList.add('active');
-        document.getElementById('uac-wrapper').classList.add('modal-open');
 
         try {
             let detail;
@@ -396,7 +393,6 @@
                 let releaseDateObj = null;
                 if(releaseDateStr && !releaseDateStr.includes('TBA')) releaseDateObj = new Date(releaseDateStr);
 
-                // FIXED: Update Game Tile Syncing just in case delays hit
                 if (releaseDateStr) {
                     const actualStatus = determineStatus(releaseDateStr);
                     const dbItem = database.find(i => i.id === item.id && i.type === 'game');
@@ -450,16 +446,15 @@
                 detail = await res.json();
 
                 const liveDate = detail.next_episode_to_air?.air_date || detail.last_episode_to_air?.air_date || detail.release_date || detail.first_air_date;
-                const debutDate = detail.release_date || detail.first_air_date || item.date; // FIXED: Ensure we evaluate Released/Upcoming on the debut date
 
                 if (liveDate) {
                     document.getElementById('m-date').innerText = formatSafeDate(liveDate);
                     
-                    const actualStatus = determineStatus(debutDate); // Calculate if the series overall is out
+                    const actualStatus = determineStatus(liveDate); // Calculates if the *active* date is Upcoming or Released
                     const dbItem = database.find(i => i.id === item.id && i.type === item.type);
                     if (dbItem) {
-                        dbItem.date = liveDate; // Keep the active episode date for display
-                        dbItem.status = actualStatus; // Ensure status remains Released if it has debuted
+                        dbItem.date = liveDate;
+                        dbItem.status = actualStatus;
                     }
 
                     const cards = document.querySelectorAll('.card');
@@ -559,8 +554,8 @@
 
     function closeModal(e, force = false) {
         if (force || e.target.id === 'modal-overlay') {
+            document.body.classList.remove('modal-open');
             document.getElementById('modal-overlay').classList.remove('active');
-            document.getElementById('uac-wrapper').classList.remove('modal-open');
         }
     }
 
