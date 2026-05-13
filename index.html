@@ -20,14 +20,15 @@
         background-color: #0f0f13;
     }
 
+    /* CHANGED absolute to fixed so the gradient stays vibrant regardless of scroll height */
     #uac-wrapper::before {
-        content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: -2;
+        content: ""; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -2;
         background: linear-gradient(-45deg, #0f0f13, #1a1025, #0a1118, #151522);
         background-size: 400% 400%; animation: gradientShift 20s ease infinite;
     }
 
     #uac-wrapper::after {
-        content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: -1;
+        content: ""; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -1;
         background-image: linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
                           linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
         background-size: 40px 40px; pointer-events: none;
@@ -281,7 +282,7 @@
             const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc`).then(res => res.json());
             const rawgUpcomingData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${today.toISOString().split('T')[0]},${nextYear}-12-31&ordering=-added&page_size=40`).then(res => res.json());
 
-            // FETCH TOP TV DETAILS: We grab a larger slice of the first two pages to catch airing shows
+            // FETCH TOP TV DETAILS
             const airingCheckIds = [
                 ...(tvPages[0].results || []).slice(0, 20),
                 ...(tvPages[1]?.results || []).slice(0, 10)
@@ -306,13 +307,13 @@
                 seenIds.add(item.id);
                 return true;
             }).map(item => {
-                let rDate = item.release_date || item.first_air_date || 'TBA';
+                // FIXED: Establish the actual debut date separate from the display date
+                const debutDate = item.release_date || item.first_air_date || 'TBA';
+                let rDate = debutDate; 
                 let isReturning = false;
                 
-                // PRIORITIZE LIVE DATES: If we have pre-fetched details, use the active episode date
                 if (item._tmdb_type === 'tv' && tvDetailsMap[item.id]) {
                     const tvD = tvDetailsMap[item.id];
-                    // Always show the most recent episode info for current shows
                     if (tvD.next_episode_to_air?.air_date) {
                         rDate = tvD.next_episode_to_air.air_date;
                     } else if (tvD.last_episode_to_air?.air_date) {
@@ -328,8 +329,9 @@
                 return {
                     id: item.id, type: mediaType, tmdb_api_type: item._tmdb_type,
                     showCategory: isReturning ? 'returning' : 'original',
-                    title: item.title || item.name, date: rDate,
-                    status: determineStatus(rDate),
+                    title: item.title || item.name, 
+                    date: rDate, // This displays the next episode
+                    status: determineStatus(debutDate), // This evaluates Released vs Upcoming based on its original debut!
                     perf: item.vote_average ? `${(item.vote_average * 10).toFixed(0)}% Score` : 'TBD',
                     image: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : FALLBACK_IMG
                 };
@@ -389,9 +391,54 @@
                 }
 
                 const updatedAgo = detail.updated ? Math.floor((today - new Date(detail.updated)) / (1000 * 60 * 60 * 24)) : 999;
-                document.getElementById('m-delays').innerText = (updatedAgo <= 5 ? "🚨 Recent activity detected." : "🟢 On track.") + ` Date: ${formatSafeDate(item.date)}`;
+                
+                const releaseDateStr = detail.released || item.date;
+                let releaseDateObj = null;
+                if(releaseDateStr && !releaseDateStr.includes('TBA')) releaseDateObj = new Date(releaseDateStr);
+
+                // FIXED: Update Game Tile Syncing just in case delays hit
+                if (releaseDateStr) {
+                    const actualStatus = determineStatus(releaseDateStr);
+                    const dbItem = database.find(i => i.id === item.id && i.type === 'game');
+                    if (dbItem) {
+                        dbItem.date = releaseDateStr;
+                        dbItem.status = actualStatus;
+                    }
+                    const cards = document.querySelectorAll('.card');
+                    for (let card of cards) {
+                        const titleEl = card.querySelector('.card-title');
+                        if (titleEl && titleEl.innerText === item.title) {
+                            const meta = card.querySelector('.card-meta');
+                            const badge = card.querySelector('.status-badge');
+                            if (meta) meta.innerHTML = `GAME &middot; ${releaseDateStr}`;
+                            if (badge) {
+                                badge.innerText = actualStatus;
+                                badge.className = `status-badge ${actualStatus === 'Released' ? 'badge-released' : 'badge-upcoming'}`;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                let dStatus = "";
+                const fmtDate = formatSafeDate(releaseDateStr);
+                const isVibeAlert = updatedAgo <= 5;
+                const delayKeywords = ['delay', 'postponed', 'pushed back', 'rescheduled', 'fall 2026', 'late 2026', '2027'];
+                const hasKeywords = delayKeywords.some(kw => descRaw.includes(kw));
+
+                if (detail.tba || !releaseDateObj) {
+                    dStatus = `📅 Release date is still TBA — no official date confirmed yet.`;
+                } else if (releaseDateObj > today) {
+                    if (hasKeywords && isVibeAlert) dStatus = `🚨 Potential Delay — Recent keywords and updates detected. Target: ${fmtDate}.`;
+                    else if (hasKeywords || isVibeAlert) dStatus = `🟡 Under Review — Recent update or delay keywords found. Target: ${fmtDate}.`;
+                    else dStatus = `🟢 On track — confirmed date: ${fmtDate}.`;
+                } else {
+                    dStatus = `✅ Already released on ${fmtDate}. No delays recorded.`;
+                }
+                
+                document.getElementById('m-delays').innerText = dStatus + (updatedAgo <= 30 ? ` (Updated ${updatedAgo} days ago)` : "");
                 document.getElementById('m-subtitle').innerText = detail.genres?.map(g => g.name).join(', ') || 'Various';
-                document.getElementById('m-desc').innerText = detail.description_raw || "No description.";
+                document.getElementById('m-desc').innerText = detail.description_raw || "No description provided.";
                 document.getElementById('m-creator').innerText = detail.developers?.[0]?.name || "Unknown";
                 document.getElementById('m-platcast-text').innerText = detail.platforms?.map(p => p.platform.name).join(', ') || "N/A";
                 
@@ -402,20 +449,19 @@
                 const res = await fetch(`https://api.themoviedb.org/3/${item.tmdb_api_type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`);
                 detail = await res.json();
 
-                // LIVE TILE SYNC: Grab the actual most recent episode date
                 const liveDate = detail.next_episode_to_air?.air_date || detail.last_episode_to_air?.air_date || detail.release_date || detail.first_air_date;
-                
+                const debutDate = detail.release_date || detail.first_air_date || item.date; // FIXED: Ensure we evaluate Released/Upcoming on the debut date
+
                 if (liveDate) {
                     document.getElementById('m-date').innerText = formatSafeDate(liveDate);
                     
-                    // Update Database for state persistence
+                    const actualStatus = determineStatus(debutDate); // Calculate if the series overall is out
                     const dbItem = database.find(i => i.id === item.id && i.type === item.type);
                     if (dbItem) {
-                        dbItem.date = liveDate;
-                        dbItem.status = determineStatus(liveDate);
+                        dbItem.date = liveDate; // Keep the active episode date for display
+                        dbItem.status = actualStatus; // Ensure status remains Released if it has debuted
                     }
 
-                    // Force DOM update on the specific card tile
                     const cards = document.querySelectorAll('.card');
                     for (let card of cards) {
                         const titleEl = card.querySelector('.card-title');
@@ -424,9 +470,8 @@
                             const badge = card.querySelector('.status-badge');
                             if (meta) meta.innerHTML = `${item.type.toUpperCase()} &middot; ${liveDate}`;
                             if (badge) {
-                                const newStatus = determineStatus(liveDate);
-                                badge.innerText = newStatus;
-                                badge.className = `status-badge ${newStatus === 'Released' ? 'badge-released' : 'badge-upcoming'}`;
+                                badge.innerText = actualStatus;
+                                badge.className = `status-badge ${actualStatus === 'Released' ? 'badge-released' : 'badge-upcoming'}`;
                             }
                             break;
                         }
@@ -436,8 +481,27 @@
                 document.getElementById('m-subtitle').innerText = detail.genres?.map(g => g.name).join(', ') || 'Various';
                 document.getElementById('m-desc').innerText = detail.overview || "No synopsis.";
                 document.getElementById('m-creator').innerText = item.tmdb_api_type === 'movie' ? (detail.credits?.crew?.find(c => c.job === 'Director')?.name || detail.production_companies?.[0]?.name) : (detail.created_by?.[0]?.name || detail.networks?.[0]?.name);
-                document.getElementById('m-lineage').innerText = item.tmdb_api_type === 'tv' ? (detail.number_of_seasons > 1 ? "Returning Series" : "New Series") : "Feature Film";
-                document.getElementById('m-delays').innerText = `Status: ${detail.status}. Most Recent/Upcoming: ${formatSafeDate(liveDate)}.`;
+                document.getElementById('m-lineage').innerText = item.tmdb_api_type === 'tv' ? (detail.number_of_seasons > 1 ? "Returning Series" : "New Series") : (detail.belongs_to_collection ? "Part of a Franchise" : "Standalone Film");
+                
+                const pop = detail.popularity || 0;
+                const pctPop = Math.min((Math.log10(pop) / Math.log10(5000)) * 100, 100).toFixed(1) + '%';
+                document.getElementById('m-hype-bar').setAttribute('data-width', pctPop);
+                
+                const tmdbStatus = detail.status;
+                const activeDate = document.getElementById('m-date').innerText;
+                const statusEmoji = { 'Released': '✅', 'In Production': '🎬', 'Post Production': '✂️', 'Planned': '📋', 'Returning Series': '📺', 'Ended': '🏁' };
+                const emoji = statusEmoji[tmdbStatus] || '📅';
+
+                const rDateParts = liveDate?.split('-');
+                let effectiveDate = rDateParts?.length === 3 ? new Date(rDateParts[0], rDateParts[1]-1, rDateParts[2]) : null;
+
+                if (effectiveDate && effectiveDate > today) {
+                    document.getElementById('m-delays').innerText = `🟢 On track — Upcoming confirmed date: ${activeDate}.`;
+                } else if (tmdbStatus === 'Released' || tmdbStatus === 'Ended') {
+                    document.getElementById('m-delays').innerText = `✅ Released — Available as of ${activeDate}.`;
+                } else {
+                    document.getElementById('m-delays').innerText = `${emoji} Status: ${tmdbStatus}. Target: ${activeDate}.`;
+                }
             }
         } catch (e) { console.error(e); }
     }
@@ -502,3 +566,4 @@
 
     loadLiveEntertainmentData();
 </script>
+
