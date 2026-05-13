@@ -254,7 +254,6 @@
         }
         const today = new Date();
         today.setHours(0, 0, 0, 0); 
-        // Correct logic: if the displayed date is tomorrow, it's Upcoming.
         return releaseDate > today ? 'Upcoming' : 'Released';
     }
 
@@ -291,8 +290,6 @@
             ];
 
             // 100% COVERAGE BATCH FETCHING
-            // Gets the details for ALL TV shows loaded to guarantee Doctor Who displays its correct 
-            // date and "Upcoming/Released" tag the moment the page loads, without hitting rate limits.
             const allTvIds = Array.from(new Set(combinedTmdbRaw.filter(i => i._tmdb_type === 'tv').map(i => i.id)));
             const tvDetailsMap = {};
             
@@ -303,7 +300,7 @@
                     const res = await fetch(`https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}`).catch(() => null);
                     if (res && res.ok) tvDetailsMap[id] = await res.json();
                 }));
-                await delay(150); // Small breath between batches
+                await delay(150); 
             }
 
             const seenIds = new Set();
@@ -315,20 +312,13 @@
                 let rDate = item.release_date || item.first_air_date || 'TBA';
                 let isReturning = false;
                 
-                // Determine the ACTIVE date (next or last episode)
+                // Pure active date check - we never fallback to a retro debut date!
                 if (item._tmdb_type === 'tv' && tvDetailsMap[item.id]) {
                     const tvD = tvDetailsMap[item.id];
                     if (tvD.next_episode_to_air?.air_date) {
                         rDate = tvD.next_episode_to_air.air_date;
                     } else if (tvD.last_episode_to_air?.air_date) {
-                        const lastAir = new Date(tvD.last_episode_to_air.air_date);
-                        const ninetyDaysAgo = new Date();
-                        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-                        if (lastAir >= ninetyDaysAgo) {
-                            rDate = tvD.last_episode_to_air.air_date;
-                        } else {
-                            rDate = tvD.first_air_date || item.first_air_date || 'TBA';
-                        }
+                        rDate = tvD.last_episode_to_air.air_date;
                     }
                     const seasons = (tvD.seasons || []).filter(s => s.season_number > 0).length;
                     isReturning = seasons > 1;
@@ -342,7 +332,7 @@
                     showCategory: isReturning ? 'returning' : 'original',
                     title: item.title || item.name, 
                     date: rDate,
-                    status: determineStatus(rDate), // Uses the ACTIVE date to assign Upcoming or Released
+                    status: determineStatus(rDate),
                     perf: item.vote_average ? `${(item.vote_average * 10).toFixed(0)}% Score` : 'TBD',
                     image: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : FALLBACK_IMG
                 };
@@ -362,7 +352,17 @@
                 perf: 'Anticipated', image: item.background_image || FALLBACK_IMG
             }));
 
-            database = [...liveMoviesAndShows, ...liveGames].sort((a, b) => {
+            // STRICT RECENCY FILTER: Purges weird API results like Doctor Who (1963)
+            const recencyCutoff = new Date();
+            recencyCutoff.setHours(0,0,0,0);
+            recencyCutoff.setDate(recencyCutoff.getDate() - 45); 
+
+            database = [...liveMoviesAndShows, ...liveGames].filter(item => {
+                if (!item.date || item.date === 'TBA') return true;
+                const parts = item.date.split('-');
+                let itemDate = parts.length === 3 ? new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)) : new Date(item.date);
+                return itemDate >= recencyCutoff;
+            }).sort((a, b) => {
                 if (a.status === 'Upcoming' && b.status !== 'Upcoming') return -1;
                 if (a.status !== 'Upcoming' && b.status === 'Upcoming') return 1;
                 return new Date(a.date) - new Date(b.date);
@@ -392,6 +392,8 @@
         document.getElementById('m-lineage').innerHTML = '<span class="loader-inline">Scanning...</span>';
         document.getElementById('m-delays').innerText = "Checking status...";
         document.getElementById('m-subtitle').innerText = "Genres loading...";
+        document.getElementById('m-hype-status').innerText = "Calculating...";
+        document.getElementById('m-hype-metric').innerText = "Data";
         // --------------------------------------
 
         // Locks body scrolling
@@ -446,7 +448,16 @@
                 document.getElementById('m-platcast-text').innerText = detail.platforms?.map(p => p.platform.name).join(', ') || "N/A";
                 
                 const logVal = detail.added > 0 ? Math.log10(detail.added) : 0;
-                document.getElementById('m-hype-bar').setAttribute('data-width', Math.min((logVal / Math.log10(500000)) * 100, 100).toFixed(1) + '%');
+                const hypeRawPct = Math.min((logVal / Math.log10(500000)) * 100, 100);
+                const hypePercentStr = hypeRawPct.toFixed(1) + '%';
+                
+                document.getElementById('m-hype-bar').setAttribute('data-width', hypePercentStr);
+                if(document.getElementById('tab-deepdive').classList.contains('active')) {
+                    document.getElementById('m-hype-bar').style.width = hypePercentStr;
+                }
+                document.getElementById('m-hype-status').innerText = detail.added > 10000 ? "🔥 HIGH HYPE" : "📈 Trending";
+                document.getElementById('m-hype-metric').innerText = `${detail.added?.toLocaleString()} Users Tracking`;
+
             } else {
                 // TMDB SYNC
                 const res = await fetch(`https://api.themoviedb.org/3/${item.tmdb_api_type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`);
@@ -457,14 +468,7 @@
                     if (detail.next_episode_to_air?.air_date) {
                         liveDate = detail.next_episode_to_air.air_date;
                     } else if (detail.last_episode_to_air?.air_date) {
-                        const lastAir = new Date(detail.last_episode_to_air.air_date);
-                        const ninetyDaysAgo = new Date();
-                        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-                        if (lastAir >= ninetyDaysAgo) {
-                            liveDate = detail.last_episode_to_air.air_date;
-                        } else {
-                            liveDate = detail.first_air_date || item.date;
-                        }
+                        liveDate = detail.last_episode_to_air.air_date;
                     }
                 } else {
                     liveDate = detail.release_date || item.date;
@@ -473,7 +477,7 @@
                 if (liveDate) {
                     document.getElementById('m-date').innerText = formatSafeDate(liveDate);
                     
-                    const actualStatus = determineStatus(liveDate); // Calculates if the *active* date is Upcoming or Released
+                    const actualStatus = determineStatus(liveDate);
                     const dbItem = database.find(i => i.id === item.id && i.type === item.type);
                     if (dbItem) {
                         dbItem.date = liveDate;
@@ -505,15 +509,29 @@
                 document.getElementById('m-platcast-title').innerText = "Lead Cast";
                 document.getElementById('m-platcast-text').innerText = detail.credits?.cast?.slice(0, 5).map(c => c.name).join(', ') || "TBA";
                 
+                // --- RESTORED TMDB HYPE LABELS ---
                 const pop = detail.popularity || 0;
-                const pctPop = Math.min((Math.log10(pop) / Math.log10(5000)) * 100, 100).toFixed(1) + '%';
-                document.getElementById('m-hype-bar').setAttribute('data-width', pctPop);
-                
-                const tmdbStatus = detail.status;
-                const activeDate = document.getElementById('m-date').innerText;
-                const statusEmoji = { 'Released': '✅', 'In Production': '🎬', 'Post Production': '✂️', 'Planned': '📋', 'Returning Series': '📺', 'Ended': '🏁' };
-                const emoji = statusEmoji[tmdbStatus] || '📅';
+                const logPop = pop > 0 ? Math.log10(pop) : 0;
+                const logPopMax = Math.log10(5000); 
+                const hypeRawPct = Math.min((logPop / logPopMax) * 100, 100);
+                const hypePercentStr = hypeRawPct.toFixed(1) + '%';
 
+                let hypeLabel;
+                if (hypeRawPct >= 90) hypeLabel = '🔥 VIRAL';
+                else if (hypeRawPct >= 70) hypeLabel = '📈 Massive Buzz';
+                else if (hypeRawPct >= 50) hypeLabel = '⚡ High Interest';
+                else if (hypeRawPct >= 30) hypeLabel = '👀 Growing Interest';
+                else hypeLabel = '🌱 Quietly Watched';
+
+                document.getElementById('m-hype-bar').setAttribute('data-width', hypePercentStr);
+                if(document.getElementById('tab-deepdive').classList.contains('active')) {
+                    document.getElementById('m-hype-bar').style.width = hypePercentStr;
+                }
+                document.getElementById('m-hype-status').innerText = hypeLabel;
+                document.getElementById('m-hype-metric').innerText = `Popularity Index: ${Math.round(pop)}`;
+                // ---------------------------------
+                
+                const activeDate = document.getElementById('m-date').innerText;
                 const rDateParts = liveDate?.split('-');
                 let effectiveDate = rDateParts?.length === 3 ? new Date(rDateParts[0], rDateParts[1]-1, rDateParts[2]) : null;
 
@@ -586,5 +604,3 @@
 
     loadLiveEntertainmentData();
 </script>
-
-
