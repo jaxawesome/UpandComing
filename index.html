@@ -1,5 +1,4 @@
 <style>
-body, html { margin: 0; padding: 0; }
     :root {
         --card-bg: #1c1c24;
         --text-main: #ffffff;
@@ -11,7 +10,6 @@ body, html { margin: 0; padding: 0; }
     }
 
     #uac-wrapper.modal-open { overflow: hidden; }
-    body.modal-open, html.modal-open { overflow: hidden; }
 
     #uac-wrapper {
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -232,8 +230,7 @@ body, html { margin: 0; padding: 0; }
     const RAWG_API_KEY = '27d3fd9ca0664e2b8076c0b0d47c4eed';
     const FALLBACK_IMG = 'https://placehold.co/600x900/2a2a35/a0a0b0?text=Image+Unavailable';
     
-    const EXCLUDED_GAME_SLUGS = new Set(['cairn', 'reanimal', 'mouse', 'mouse-2', 'mouse-p-i-for-hire']);
-    const EXCLUDED_GAME_TITLES = new Set(['mouse']);
+    const EXCLUDED_GAME_SLUGS = new Set(['cairn', 'reanimal', 'mouse', 'mouse-2']);
 
     let database = [];
     let currentFilters = { type: 'all', status: 'all', showType: 'all' };
@@ -317,7 +314,7 @@ body, html { margin: 0; padding: 0; }
             const rawgUpcomingUrl = `https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${today.toISOString().split('T')[0]},${nextYear}-12-31&ordering=-added&page_size=40`;
 
             const moviePromises = [];
-            for(let i = 1; i <= 3; i++) {
+            for(let i = 1; i <= 6; i++) {
                 moviePromises.push(fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${twoWeeksAgoFormatted}&sort_by=popularity.desc&page=${i}`).then(r => r.json()));
             }
 
@@ -345,13 +342,13 @@ body, html { margin: 0; padding: 0; }
             }
 
             const flatMovies = moviePages.flatMap(page => page.results || []);
-            flatMovies.slice(0, 45).forEach(m => { combinedTmdbRaw.push({...m, _tmdb_type: 'movie'}); });
+            flatMovies.slice(0, 60).forEach(m => { combinedTmdbRaw.push({...m, _tmdb_type: 'movie'}); });
 
             const flatTv = tvPages.flatMap(page => page.results || []);
-            flatTv.slice(0, 35).forEach(t => { combinedTmdbRaw.push({...t, _tmdb_type: 'tv'}); });
+            flatTv.slice(0, 50).forEach(t => { combinedTmdbRaw.push({...t, _tmdb_type: 'tv'}); });
 
             const flatTvNew = tvNewPages.flatMap(page => page.results || []);
-            flatTvNew.slice(0, 35).forEach(t => { combinedTmdbRaw.push({...t, _tmdb_type: 'tv'}); });
+            flatTvNew.slice(0, 50).forEach(t => { combinedTmdbRaw.push({...t, _tmdb_type: 'tv'}); });
             
             if (animeTvData.results) {
                 animeTvData.results.forEach(t => { combinedTmdbRaw.push({...t, _tmdb_type: 'tv', _is_anime: true}); });
@@ -430,9 +427,8 @@ body, html { margin: 0; padding: 0; }
 
             allRawgResults.forEach(g => {
                 if (EXCLUDED_GAME_SLUGS.has(g.slug)) return;
-                
+
                 const normTitle = normalizeTitle(g.name);
-                if (EXCLUDED_GAME_TITLES.has(normTitle)) return;
                 const isDupTitle = seenGameTitles.has(normTitle);
 
                 if (!seenGameIds.has(g.id) && !isDupTitle) {
@@ -579,8 +575,6 @@ body, html { margin: 0; padding: 0; }
 
         overlay.classList.add('active');
         document.getElementById('uac-wrapper').classList.add('modal-open');
-        document.body.classList.add('modal-open');
-        document.documentElement.classList.add('modal-open');
 
         try {
             if (item.type === 'game') {
@@ -618,13 +612,13 @@ body, html { margin: 0; padding: 0; }
                 const tags = detail.tags?.map(t => t.slug) || [];
                 const tagNames = detail.tags?.map(t => t.name?.toLowerCase()) || [];
                 
-                const KNOWN_REBOOTS = ['fable', 'tomb raider', 'prince of persia', 'alone in the dark', 'alone in dark', 'perfect dark'];
+                const KNOWN_REBOOTS = ['fable', 'tomb raider', 'prince of persia', 'alone in the dark', 'alone in dark', 'perfect dark', 'gothic', 'black flag'];
                 const KNOWN_SERIES_FALLBACK = [
                     'life is strange', 'grand theft auto', 'resident evil', 'monster hunter', 
                     'dragon age', 'final fantasy', 'persona', 'assassins creed', 'halo', 
                     'gears of war', 'god of war', 'call of duty', 'super mario', 'legend of zelda', 
                     'pokemon', 'mafia', 'civilization', 'borderlands', 'witcher', 'cyberpunk', 'fallout',
-                    'control resonant'
+                    'lords of the fallen', 'control resonant'
                 ];
 
                 const gameTitleLower = (detail.name || '').toLowerCase();
@@ -776,8 +770,6 @@ body, html { margin: 0; padding: 0; }
         if (force || e.target === document.getElementById('modal-overlay')) {
             document.getElementById('modal-overlay').classList.remove('active');
             document.getElementById('uac-wrapper').classList.remove('modal-open');
-            document.body.classList.remove('modal-open');
-            document.documentElement.classList.remove('modal-open');
         }
     }
 
