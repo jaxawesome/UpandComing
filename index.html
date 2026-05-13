@@ -1,0 +1,784 @@
+<style>
+    :root {
+        --card-bg: #1c1c24;
+        --text-main: #ffffff;
+        --text-muted: #a0a0b0;
+        --accent: #6c5ce7;
+        --released: #2ecc71;
+        --upcoming: #f39c12;
+        --hype-gradient: linear-gradient(90deg, #fdcb6e, #ff7675);
+    }
+
+    #uac-wrapper.modal-open { overflow: hidden; }
+    body.modal-open, html.modal-open { overflow: hidden; }
+
+    #uac-wrapper {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color: var(--text-main); margin: 0; padding: 2rem; min-height: 100vh;
+        position: relative; z-index: 1;
+        background-color: #0f0f13;
+    }
+
+    #uac-wrapper::before {
+        content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: -2;
+        background: linear-gradient(-45deg, #0f0f13, #1a1025, #0a1118, #151522);
+        background-size: 400% 400%; animation: gradientShift 20s ease infinite;
+    }
+
+    #uac-wrapper::after {
+        content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: -1;
+        background-image: linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+                          linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+        background-size: 40px 40px; pointer-events: none;
+        -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+        mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+    }
+
+    @keyframes gradientShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+
+    h1 { 
+        text-align: center; font-size: 4rem; margin-top: 1rem; margin-bottom: 2rem; 
+        letter-spacing: -2px; font-weight: 900; text-transform: uppercase;
+        background: linear-gradient(135deg, var(--accent), #ff7675, #fdcb6e);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0px 8px 16px rgba(108, 92, 231, 0.25));
+    }
+
+    .controls-container { display: flex; flex-direction: column; align-items: center; gap: 1rem; margin-bottom: 3rem; }
+    .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; background: rgba(21, 21, 26, 0.8); backdrop-filter: blur(10px); padding: 0.5rem; border-radius: 40px; border: 1px solid rgba(255,255,255,0.05); }
+    
+    button.toggle-btn {
+        background: transparent; color: var(--text-muted); border: none;
+        padding: 0.6rem 1.5rem; border-radius: 30px; cursor: pointer;
+        font-size: 0.9rem; font-weight: 600; transition: all 0.2s ease;
+    }
+
+    button.toggle-btn:hover { color: var(--text-main); }
+    button.toggle-btn.active { background-color: var(--card-bg); color: var(--text-main); box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+
+    @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2rem; max-width: 1200px; margin: 0 auto; }
+
+    .card {
+        background-color: var(--card-bg); border-radius: 16px; overflow: hidden;
+        cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.4); display: flex; flex-direction: column;
+        border: 1px solid rgba(255,255,255,0.03);
+    }
+    .card:hover { transform: translateY(-8px); box-shadow: 0 10px 25px rgba(108, 92, 231, 0.3); border-color: rgba(108, 92, 231, 0.2); }
+
+    .card-img { width: 100%; height: 250px; object-fit: cover; background-color: #2a2a35; }
+    .card-content { padding: 1.5rem; display: flex; flex-direction: column; flex-grow: 1; }
+    .card-title { margin: 0 0 0.5rem 0; font-size: 1.25rem; }
+    .card-meta { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem; flex-grow: 1; }
+    
+    .status-badge { display: inline-block; padding: 0.35rem 0.8rem; border-radius: 12px; font-size: 0.75rem; font-weight: bold; align-self: flex-start; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge-released { background-color: rgba(46, 204, 113, 0.15); color: var(--released); }
+    .badge-upcoming { background-color: rgba(243, 156, 18, 0.15); color: var(--upcoming); }
+    .badge-unknown { background-color: rgba(160, 160, 176, 0.15); color: var(--text-muted); }
+
+    .modal-overlay {
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85);
+        display: flex; justify-content: center; align-items: center;
+        opacity: 0; pointer-events: none; transition: opacity 0.3s ease; backdrop-filter: blur(8px); z-index: 1000;
+    }
+    .modal-overlay.active { opacity: 1; pointer-events: all; }
+    
+    .modal {
+        background-color: var(--card-bg); padding: 2.5rem; border-radius: 20px;
+        max-width: 700px; width: 90%; transform: scale(0.9); transition: transform 0.3s ease;
+        position: relative; max-height: 85vh; overflow-y: auto; overflow-x: hidden;
+        border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    }
+    .modal-overlay.active .modal { transform: scale(1); }
+    .close-btn { position: absolute; top: 1.5rem; right: 1.5rem; background: none; border: none; color: var(--text-muted); font-size: 2rem; cursor: pointer; line-height: 1; z-index: 10; }
+    .close-btn:hover { color: var(--text-main); }
+    .modal-title { margin-top: 0; font-size: 2.2rem; margin-bottom: 0.5rem; padding-right: 2rem; }
+    
+    .modal-tabs {
+        display: flex; gap: 1rem; margin-bottom: 1.5rem;
+        border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.5rem;
+    }
+    .tab-btn {
+        background: none; border: none; color: var(--text-muted);
+        font-size: 1.1rem; cursor: pointer; padding: 0.5rem 1rem;
+        font-weight: 600; position: relative; transition: color 0.2s;
+    }
+    .tab-btn:hover { color: var(--text-main); }
+    .tab-btn.active { color: var(--text-main); }
+    .tab-btn.active::after {
+        content: ''; position: absolute; bottom: -0.6rem; left: 0; right: 0;
+        height: 3px; background: var(--accent); border-radius: 3px;
+    }
+    .tab-content { display: none; animation: slideIn 0.3s cubic-bezier(0.25, 1, 0.5, 1); }
+    .tab-content.active { display: block; }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+    .modal-subtitle { color: var(--accent); font-weight: 600; margin-bottom: 1.5rem; font-size: 1.1rem; }
+    .modal-desc { line-height: 1.6; color: #ddd; margin-bottom: 2rem; }
+    .modal-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
+    .stat-box { background: #2a2a35; padding: 1.2rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.02); }
+    .stat-label { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
+    .stat-value { font-size: 1.1rem; font-weight: bold; margin-top: 0.4rem; }
+
+    .details-grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+    .detail-section { background: rgba(42, 42, 53, 0.4); padding: 1.2rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.02); }
+    .detail-section h4 { margin: 0 0 0.8rem 0; color: var(--accent); text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px; }
+    .detail-text { font-size: 1rem; color: #eee; line-height: 1.5; }
+    
+    .hype-wrapper { width: 100%; background: #1a1a24; border-radius: 20px; height: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05); }
+    .hype-fill { height: 100%; background: var(--hype-gradient); width: 0%; transition: width 1.2s cubic-bezier(0.25, 1, 0.5, 1); border-radius: 20px; }
+    .hype-label { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; }
+
+    .loading-text { text-align: center; width: 100%; grid-column: 1 / -1; font-size: 1.2rem; color: var(--text-muted); padding: 2rem; }
+    .loader-inline { color: var(--accent); font-style: italic; }
+
+    @media (max-width: 768px) {
+        #uac-wrapper { padding: 1rem; }
+        h1 { font-size: 2.5rem; margin-bottom: 1.5rem; }
+        .controls { flex-wrap: wrap; justify-content: center; border-radius: 20px; }
+        button.toggle-btn { padding: 0.5rem 1rem; font-size: 0.85rem; }
+        .grid { grid-template-columns: 1fr; gap: 1.5rem; }
+        .modal { padding: 1.5rem; width: 95%; max-height: 90vh; }
+        .modal-title { font-size: 1.8rem; }
+        .modal-stats { grid-template-columns: 1fr; gap: 0.8rem; }
+    }
+</style>
+
+<div id="uac-wrapper">
+    <h1>UpandComing</h1>
+
+    <div class="controls-container">
+        <div class="controls" id="type-controls">
+            <button class="toggle-btn active" onclick="setFilter('type', 'all', this)">All Media</button>
+            <button class="toggle-btn" onclick="setFilter('type', 'game', this)">Games</button>
+            <button class="toggle-btn" onclick="setFilter('type', 'movie', this)">Movies</button>
+            <button class="toggle-btn" onclick="setFilter('type', 'show', this)">Shows</button>
+            <button class="toggle-btn" onclick="setFilter('type', 'anime', this)">Anime</button>
+        </div>
+        <div class="controls" id="status-controls">
+            <button class="toggle-btn active" onclick="setFilter('status', 'all', this)">All Statuses</button>
+            <button class="toggle-btn" onclick="setFilter('status', 'Upcoming', this)">Upcoming</button>
+            <button class="toggle-btn" onclick="setFilter('status', 'Released', this)">Released</button>
+        </div>
+        <div class="controls" id="shows-controls" style="display: none; animation: slideDown 0.3s ease;">
+            <button class="toggle-btn active" onclick="setFilter('showType', 'all', this)">All Shows</button>
+            <button class="toggle-btn" onclick="setFilter('showType', 'original', this)">Originals</button>
+            <button class="toggle-btn" onclick="setFilter('showType', 'returning', this)">Returning</button>
+        </div>
+    </div>
+
+    <div class="grid" id="content-grid">
+        <div class="loading-text">Fetching latest data from global APIs...</div>
+    </div>
+
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+        <div class="modal" id="modal-content">
+            <button class="close-btn" onclick="closeModal(event, true)">&times;</button>
+            <h2 class="modal-title" id="m-title">Title</h2>
+            
+            <div class="modal-tabs">
+                <button class="tab-btn active" onclick="switchTab('overview', this)">Overview</button>
+                <button class="tab-btn" onclick="switchTab('deepdive', this)">Deep Dive</button>
+            </div>
+
+            <div id="tab-overview" class="tab-content active">
+                <div class="modal-subtitle" id="m-subtitle">Genres loading...</div>
+                <div class="modal-desc" id="m-desc">Description loading...</div>
+                <div class="modal-stats">
+                    <div class="stat-box"><div class="stat-label">Format</div><div class="stat-value" id="m-type">Loading</div></div>
+                    <div class="stat-box"><div class="stat-label">Release Date</div><div class="stat-value" id="m-date">Loading</div></div>
+                    <div class="stat-box"><div class="stat-label">Reception</div><div class="stat-value" id="m-perf">Loading</div></div>
+                    <div class="stat-box"><div class="stat-label" id="m-creator-label">Studio/Creator</div><div class="stat-value" id="m-creator">Loading...</div></div>
+                </div>
+            </div>
+
+            <div id="tab-deepdive" class="tab-content">
+                <div class="details-grid">
+                    <div class="detail-section">
+                        <h4>Community Hype</h4>
+                        <div class="hype-wrapper"><div class="hype-fill" id="m-hype-bar"></div></div>
+                        <div class="hype-label">
+                            <span id="m-hype-status">Calculating...</span>
+                            <span id="m-hype-metric">Data</span>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <h4>Lineage</h4>
+                        <div class="detail-text" id="m-lineage">Loading...</div>
+                    </div>
+                    <div class="detail-section" id="m-platcast-section">
+                        <h4 id="m-platcast-title">Platforms</h4>
+                        <div class="detail-text" id="m-platcast-text">Loading...</div>
+                    </div>
+                    <div class="detail-section">
+                        <h4>Release Status / Delays</h4>
+                        <div class="detail-text" id="m-delays">Loading...</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    const TMDB_API_KEY = '4fb0a96f5abedde3dfa2c85bb88985a1';
+    const RAWG_API_KEY = '27d3fd9ca0664e2b8076c0b0d47c4eed';
+    const FALLBACK_IMG = 'https://placehold.co/600x900/2a2a35/a0a0b0?text=Image+Unavailable';
+    
+    const EXCLUDED_GAME_SLUGS = new Set(['cairn', 'reanimal', 'mouse', 'mouse-2', 'mouse-p-i-for-hire']);
+    const EXCLUDED_GAME_TITLES = new Set(['mouse']);
+
+    let database = [];
+    let currentFilters = { type: 'all', status: 'all', showType: 'all' };
+
+    function normalizeTitle(title) {
+        let t = (title || '').toLowerCase();
+        t = t.replace(/\(\d{4}\)/g, ''); 
+        t = t.split(':')[0]; 
+        t = t.replace(/p\.?\s*i\.?/g, 'pi');
+        t = t.replace(/[^a-z0-9 ]/g, '');
+        t = t.replace(/\b(the|a|an)\b/g, '');
+        t = t.replace(/\s+/g, ' ');
+        return t.trim();
+    }
+
+    function formatSafeDate(dateString) {
+        if (!dateString || dateString.includes('TBA')) return dateString;
+        
+        const parts = dateString.split('-');
+        if (parts.length === 3) {
+            const year = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1; 
+            const day = parseInt(parts[2], 10);
+            
+            const d = new Date(year, month, day);
+            return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        }
+        return dateString;
+    }
+
+    function switchTab(tabId, btnElement) {
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        if(btnElement) btnElement.classList.add('active');
+        
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+        document.getElementById('tab-' + tabId).classList.add('active');
+
+        if(tabId === 'deepdive') {
+            const bar = document.getElementById('m-hype-bar');
+            const width = bar.getAttribute('data-width') || '0%';
+            bar.style.width = '0%';
+            setTimeout(() => { bar.style.width = width; }, 50);
+        }
+    }
+
+    function determineStatus(dateString) {
+        if (!dateString || dateString.includes('TBA')) return 'Upcoming';
+        
+        const parts = dateString.split('-');
+        let releaseDate;
+        if (parts.length === 3) {
+            releaseDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        } else {
+            releaseDate = new Date(dateString);
+        }
+        
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); 
+        return releaseDate <= today ? 'Released' : 'Upcoming';
+    }
+
+    async function loadLiveEntertainmentData() {
+        try {
+            const today = new Date();
+            
+            const twoWeeksAgo = new Date();
+            twoWeeksAgo.setDate(today.getDate() - 14);
+            const twoWeeksAgoFormatted = twoWeeksAgo.toISOString().split('T')[0];
+
+            const eightWeeksAgo = new Date();
+            eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 60);
+            const eightWeeksAgoFormatted = eightWeeksAgo.toISOString().split('T')[0];
+
+            const nextYear = today.getFullYear() + 2;
+
+            const tmdbTrendUrl = `https://api.themoviedb.org/3/trending/all/week?api_key=${TMDB_API_KEY}`;
+            const tmdbAnimeTvUrl = `https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc`;
+            const tmdbAnimeMovieUrl = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${twoWeeksAgoFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc`;
+            
+            const rawgRecentUrl = `https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${eightWeeksAgoFormatted},${today.toISOString().split('T')[0]}&ordering=-added&page_size=20`;
+            const rawgUpcomingUrl = `https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${today.toISOString().split('T')[0]},${nextYear}-12-31&ordering=-added&page_size=40`;
+
+            const moviePromises = [];
+            for(let i = 1; i <= 3; i++) {
+                moviePromises.push(fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${twoWeeksAgoFormatted}&sort_by=popularity.desc&page=${i}`).then(r => r.json()));
+            }
+
+            const tvPromises = []; 
+            const tvNewPromises = []; 
+            for(let i = 1; i <= 3; i++) { 
+                tvPromises.push(fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&sort_by=popularity.desc&with_original_language=en&without_genres=10763,10767&page=${i}`).then(r => r.json()));
+                tvNewPromises.push(fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&first_air_date.gte=${twoWeeksAgoFormatted}&sort_by=popularity.desc&with_original_language=en&without_genres=10763,10767&page=${i}`).then(r => r.json()));
+            }
+
+            const [trendData, animeTvData, animeMovData, rawgRecentData, rawgUpcomingData, moviePages, tvPages, tvNewPages] = await Promise.all([
+                fetch(tmdbTrendUrl).then(res => res.json()), 
+                fetch(tmdbAnimeTvUrl).then(res => res.json()), 
+                fetch(tmdbAnimeMovieUrl).then(res => res.json()),
+                fetch(rawgRecentUrl).then(res => res.json()), 
+                fetch(rawgUpcomingUrl).then(res => res.json()),
+                Promise.all(moviePromises),
+                Promise.all(tvPromises),
+                Promise.all(tvNewPromises)
+            ]);
+
+            let combinedTmdbRaw = [];
+            if (trendData.results) {
+                trendData.results.forEach(m => { combinedTmdbRaw.push({...m, _tmdb_type: m.media_type || 'movie'}); });
+            }
+
+            const flatMovies = moviePages.flatMap(page => page.results || []);
+            flatMovies.slice(0, 45).forEach(m => { combinedTmdbRaw.push({...m, _tmdb_type: 'movie'}); });
+
+            const flatTv = tvPages.flatMap(page => page.results || []);
+            flatTv.slice(0, 35).forEach(t => { combinedTmdbRaw.push({...t, _tmdb_type: 'tv'}); });
+
+            const flatTvNew = tvNewPages.flatMap(page => page.results || []);
+            flatTvNew.slice(0, 35).forEach(t => { combinedTmdbRaw.push({...t, _tmdb_type: 'tv'}); });
+            
+            if (animeTvData.results) {
+                animeTvData.results.forEach(t => { combinedTmdbRaw.push({...t, _tmdb_type: 'tv', _is_anime: true}); });
+            }
+            if (animeMovData.results) {
+                animeMovData.results.forEach(m => { combinedTmdbRaw.push({...m, _tmdb_type: 'movie', _is_anime: true}); });
+            }
+
+            const uniqueTmdb = [];
+            const seenIds = new Set();
+            combinedTmdbRaw.forEach(item => {
+                if (!seenIds.has(item.id)) { 
+                    seenIds.add(item.id); 
+                    uniqueTmdb.push(item); 
+                }
+            });
+
+            const tvIds = uniqueTmdb.filter(i => i._tmdb_type === 'tv').map(i => i.id);
+            const tvDetailsPromises = tvIds.map(id => 
+                fetch(`https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}`)
+                .then(r => r.ok ? r.json() : null)
+                .catch(() => null)
+            );
+            const tvDetailsRaw = await Promise.all(tvDetailsPromises);
+            const tvDetailsMap = {};
+            tvDetailsRaw.forEach(d => { if(d && d.id) tvDetailsMap[d.id] = d; });
+
+            const liveMoviesAndShows = uniqueTmdb.map(item => {
+                let rDate = item.release_date || item.first_air_date || '';
+                let isReturning = false;
+                
+                if (item._tmdb_type === 'tv' && tvDetailsMap[item.id]) {
+                    const tvD = tvDetailsMap[item.id];
+                    if (tvD.next_episode_to_air && tvD.next_episode_to_air.air_date) {
+                        rDate = tvD.next_episode_to_air.air_date;
+                    } else if (tvD.last_episode_to_air && tvD.last_episode_to_air.air_date) {
+                        rDate = tvD.last_episode_to_air.air_date;
+                    }
+                    
+                    const standardSeasons = (tvD.seasons || []).filter(s => s.season_number > 0).length;
+                    if (standardSeasons > 1 || (tvD.last_episode_to_air && tvD.last_episode_to_air.season_number > 1)) {
+                        isReturning = true;
+                    }
+                }
+                
+                let mediaType = item._tmdb_type === 'tv' ? 'show' : 'movie';
+                if (item._is_anime || (item.original_language === 'ja' && item.genre_ids?.includes(16))) {
+                    mediaType = 'anime';
+                }
+
+                return {
+                    id: item.id, 
+                    type: mediaType, 
+                    tmdb_api_type: item._tmdb_type, 
+                    showCategory: isReturning ? 'returning' : 'original',
+                    title: item.title || item.name, 
+                    date: rDate || 'TBA',
+                    status: determineStatus(rDate),
+                    perf: item.vote_average ? `${(item.vote_average * 10).toFixed(0)}% Audience Score` : 'TBD',
+                    image: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : FALLBACK_IMG
+                };
+            }).filter(item => {
+                if (item.date === 'TBA') return true;
+                const parts = item.date.split('-');
+                if (parts.length === 3) {
+                    const itemDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                    return itemDate >= twoWeeksAgo;
+                }
+                return new Date(item.date) >= twoWeeksAgo;
+            });
+
+            const allRawgResults = [...(rawgRecentData.results || []), ...(rawgUpcomingData.results || [])];
+            const seenGameIds = new Set();
+            const seenGameTitles = new Set();
+            const dedupedGames = [];
+
+            allRawgResults.forEach(g => {
+                if (EXCLUDED_GAME_SLUGS.has(g.slug)) return;
+                
+                const normTitle = normalizeTitle(g.name);
+                if (EXCLUDED_GAME_TITLES.has(normTitle)) return;
+                const isDupTitle = seenGameTitles.has(normTitle);
+
+                if (!seenGameIds.has(g.id) && !isDupTitle) {
+                    seenGameIds.add(g.id);
+                    seenGameTitles.add(normTitle);
+                    dedupedGames.push(g);
+                }
+            });
+
+            const liveGames = dedupedGames.map(item => {
+                let finalDate = item.released || 'TBA';
+                if (item.tba) finalDate = 'TBA'; 
+
+                const isReleased = determineStatus(finalDate) === 'Released';
+                let bestScore = null;
+                if (isReleased) {
+                    bestScore = item.metacritic || null;
+                    if (!bestScore && item.metacritic_platforms?.length > 0) {
+                        const validScores = item.metacritic_platforms.map(p => p.metascore).filter(Boolean);
+                        if (validScores.length > 0) bestScore = Math.max(...validScores);
+                    }
+                }
+
+                let perf = !isReleased ? 'Anticipated' :
+                        bestScore ? `${bestScore} Metacritic` :
+                        item.rating > 0 ? `${item.rating.toFixed(1)}/5 Audience Score` :
+                        'Pending Reviews';
+
+                return {
+                    id: item.id, slug: item.slug, type: 'game',
+                    title: item.name, date: finalDate, tba: item.tba,
+                    status: determineStatus(finalDate),
+                    perf, metacritic: bestScore,
+                    image: item.background_image || FALLBACK_IMG
+                };
+            });
+
+            const sortedDb = [...liveMoviesAndShows, ...liveGames].sort((a, b) => {
+                const aUp = a.status === 'Upcoming', bUp = b.status === 'Upcoming';
+                if (aUp && !bUp) return -1;
+                if (!aUp && bUp) return 1;
+                if (a.date.includes('TBA')) return -1;
+                if (b.date.includes('TBA')) return 1;
+                return aUp ? new Date(a.date) - new Date(b.date) : new Date(b.date) - new Date(a.date);
+            });
+
+            const globalTitles = new Set();
+            database = sortedDb.filter(item => {
+                let nTitle = normalizeTitle(item.title);
+                if (globalTitles.has(nTitle)) return false;
+                globalTitles.add(nTitle);
+                return true;
+            });
+
+            renderCards();
+
+        } catch (error) {
+            console.error("Fetch Error:", error);
+            document.getElementById('content-grid').innerHTML = '<div class="loading-text" style="color: #ff7675;">Failed to load data. API might be unreachable.</div>';
+        }
+    }
+
+    function getBadgeClass(status) {
+        return status === 'Released' ? 'badge-released' : status === 'Upcoming' ? 'badge-upcoming' : 'badge-unknown';
+    }
+
+    function setFilter(filterCategory, value, btnElement) {
+        currentFilters[filterCategory] = value;
+        
+        btnElement.parentElement.querySelectorAll('.toggle-btn').forEach(btn => btn.classList.remove('active'));
+        btnElement.classList.add('active');
+
+        if (filterCategory === 'type') {
+            const showsControls = document.getElementById('shows-controls');
+            if (value === 'show') {
+                showsControls.style.display = 'flex';
+            } else {
+                showsControls.style.display = 'none';
+                currentFilters.showType = 'all'; 
+                showsControls.querySelectorAll('.toggle-btn').forEach((btn, idx) => {
+                    btn.classList.toggle('active', idx === 0);
+                });
+            }
+        }
+
+        renderCards();
+    }
+
+    function renderCards() {
+        const grid = document.getElementById('content-grid');
+        grid.innerHTML = '';
+        
+        const filtered = database.filter(item => {
+            const typeMatch = currentFilters.type === 'all' || item.type === currentFilters.type;
+            const statusMatch = currentFilters.status === 'all' || item.status === currentFilters.status;
+            
+            let showCategoryMatch = true;
+            if (currentFilters.type === 'show' && item.type === 'show' && currentFilters.showType !== 'all') {
+                showCategoryMatch = item.showCategory === currentFilters.showType;
+            }
+
+            return typeMatch && statusMatch && showCategoryMatch;
+        });
+
+        if (filtered.length === 0) {
+            grid.innerHTML = `<div class="loading-text">No ${currentFilters.status.toLowerCase()} ${currentFilters.type !== 'all' ? currentFilters.type + 's' : 'items'} found.</div>`;
+            return;
+        }
+
+        filtered.forEach(item => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.onclick = () => openModal(item);
+            
+            card.innerHTML = `
+                <div class="card-img" style="background-image: url('${item.image}'); background-size: cover; background-position: center;"></div>
+                <div class="card-content">
+                    <h3 class="card-title">${item.title}</h3>
+                    <div class="card-meta">${item.type.toUpperCase()} &middot; ${item.date}</div>
+                    <span class="status-badge ${getBadgeClass(item.status)}">${item.status}</span>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    async function openModal(item) {
+        const overlay = document.getElementById('modal-overlay');
+        switchTab('overview', document.querySelector('.modal-tabs .tab-btn'));
+        document.getElementById('m-hype-bar').style.width = '0%';
+
+        document.getElementById('m-title').innerText = item.title;
+        document.getElementById('m-type').innerText = item.type.toUpperCase();
+        
+        document.getElementById('m-date').innerText = formatSafeDate(item.date);
+        
+        document.getElementById('m-perf').innerText = item.perf;
+        document.getElementById('m-desc').innerHTML = '<span class="loader-inline">Fetching detailed description...</span>';
+        document.getElementById('m-subtitle').innerText = 'Loading info...';
+        document.getElementById('m-creator').innerHTML = '<span class="loader-inline">...</span>';
+        document.getElementById('m-lineage').innerHTML = '<span class="loader-inline">Scanning databases...</span>';
+        document.getElementById('m-platcast-text').innerHTML = '<span class="loader-inline">Fetching...</span>';
+        document.getElementById('m-delays').innerText = "Checking status...";
+
+        overlay.classList.add('active');
+        document.getElementById('uac-wrapper').classList.add('modal-open');
+        document.body.classList.add('modal-open');
+        document.documentElement.classList.add('modal-open');
+
+        try {
+            if (item.type === 'game') {
+                const res = await fetch(`https://api.rawg.io/api/games/${item.id}?key=${RAWG_API_KEY}`);
+                const detail = await res.json();
+
+                document.getElementById('m-desc').innerText = detail.description_raw || "No description provided by developers yet.";
+                document.getElementById('m-subtitle').innerText = detail.genres ? detail.genres.map(g => g.name).join(', ') : 'Various Genres';
+                document.getElementById('m-creator-label').innerText = 'Developer';
+                document.getElementById('m-creator').innerText = detail.developers?.length > 0 ? detail.developers[0].name : 'Developer Unknown';
+
+                document.getElementById('m-platcast-title').innerText = "Platforms";
+                document.getElementById('m-platcast-text').innerText = detail.platforms?.map(p => p.platform.name).join(', ') || "Unknown systems";
+
+                const addedCount = detail.added || 0;
+                const logValue = addedCount > 0 ? Math.log10(addedCount) : 0;
+                const logMax = Math.log10(500000); 
+                const hypeRaw = Math.min((logValue / logMax) * 100, 100);
+                const hypePercent = hypeRaw.toFixed(1) + '%';
+
+                let hypeLabel;
+                if (hypeRaw >= 90) hypeLabel = '🔥 MAXIMUM HYPE';
+                else if (hypeRaw >= 70) hypeLabel = '📈 Massive Buzz';
+                else if (hypeRaw >= 50) hypeLabel = '⚡ High Interest';
+                else if (hypeRaw >= 30) hypeLabel = '👀 Growing Interest';
+                else hypeLabel = '🌱 Quietly Watched';
+                
+                document.getElementById('m-hype-bar').setAttribute('data-width', hypePercent);
+                if(document.getElementById('tab-deepdive').classList.contains('active')) {
+                    document.getElementById('m-hype-bar').style.width = hypePercent;
+                }
+                document.getElementById('m-hype-status').innerText = hypeLabel;
+                document.getElementById('m-hype-metric').innerText = `${addedCount.toLocaleString()} Users Tracking`;
+
+                const tags = detail.tags?.map(t => t.slug) || [];
+                const tagNames = detail.tags?.map(t => t.name?.toLowerCase()) || [];
+                
+                const KNOWN_REBOOTS = ['fable', 'tomb raider', 'prince of persia', 'alone in the dark', 'alone in dark', 'perfect dark'];
+                const KNOWN_SERIES_FALLBACK = [
+                    'life is strange', 'grand theft auto', 'resident evil', 'monster hunter', 
+                    'dragon age', 'final fantasy', 'persona', 'assassins creed', 'halo', 
+                    'gears of war', 'god of war', 'call of duty', 'super mario', 'legend of zelda', 
+                    'pokemon', 'mafia', 'civilization', 'borderlands', 'witcher', 'cyberpunk', 'fallout',
+                    'control resonant'
+                ];
+
+                const gameTitleLower = (detail.name || '').toLowerCase();
+                const titleForSeriesCheck = gameTitleLower.replace(/[^a-z0-9 ]/g, ''); 
+
+                const isKnownReboot = KNOWN_REBOOTS.some(r => gameTitleLower.startsWith(r));
+                const hasRebootTag = tags.some(t => t.includes('reboot') || t.includes('reimagin')) || tagNames.some(t => t.includes('reboot') || t.includes('reimagin'));
+                const hasRemakeTag = tags.some(t => t.includes('remake') || t.includes('remaster')) || tagNames.some(t => t.includes('remake') || t.includes('remaster'));
+                const isKnownSeries = KNOWN_SERIES_FALLBACK.some(prefix => titleForSeriesCheck.includes(prefix.replace(/[^a-z0-9 ]/g, '')));
+
+                if (hasRebootTag || isKnownReboot) document.getElementById('m-lineage').innerText = "Reboot";
+                else if (hasRemakeTag) document.getElementById('m-lineage').innerText = "Remake / Remaster";
+                else if (tags.includes('sequel') || detail.series_count > 0 || isKnownSeries) document.getElementById('m-lineage').innerText = "Sequel / Part of a Series";
+                else document.getElementById('m-lineage').innerText = "Original / Standalone";
+
+                const releaseDate = item.date !== 'TBA' ? item.date : null;
+                let delayText = '';
+
+                if (item.tba || !releaseDate) {
+                    delayText = `📅 Release date is still TBA — no official date confirmed yet.`;
+                } else {
+                    const parts = releaseDate.split('-');
+                    let releaseDateObj = new Date(releaseDate);
+                    if(parts.length === 3) {
+                        releaseDateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                    }
+                    
+                    const today = new Date();
+                    today.setHours(0,0,0,0); 
+
+                    if (releaseDateObj > today) {
+                        const formattedDate = formatSafeDate(releaseDate);
+                        delayText = `🟢 On track — confirmed release date: ${formattedDate}.`;
+                        if (detail.updated) {
+                            const updatedAgo = Math.floor((today - new Date(detail.updated)) / (1000 * 60 * 60 * 24));
+                            if (updatedAgo <= 30) {
+                                delayText += ` (Listing updated ${updatedAgo} day${updatedAgo === 1 ? '' : 's'} ago — may reflect a recent change.)`;
+                            }
+                        }
+                    } else {
+                        const formattedDate = formatSafeDate(releaseDate);
+                        delayText = `✅ Already released on ${formattedDate}. No delays recorded.`;
+                    }
+                }
+                document.getElementById('m-delays').innerText = delayText;
+
+            } else {
+                const res = await fetch(`https://api.themoviedb.org/3/${item.tmdb_api_type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`);
+                const detail = await res.json();
+
+                document.getElementById('m-desc').innerText = detail.overview || "No synopsis available.";
+                document.getElementById('m-subtitle').innerText = detail.genres ? detail.genres.map(g => g.name).join(', ') : 'Various Genres';
+
+                if (item.tmdb_api_type === 'movie') {
+                    document.getElementById('m-creator-label').innerText = 'Director / Studio';
+                    const director = detail.credits?.crew?.find(c => c.job === 'Director')?.name;
+                    document.getElementById('m-creator').innerText = director || detail.production_companies?.[0]?.name || 'Unknown';
+                    
+                    document.getElementById('m-lineage').innerText = detail.belongs_to_collection ? `Part of a Series (${detail.belongs_to_collection.name})` : "Original / Standalone";
+                } else {
+                    document.getElementById('m-creator-label').innerText = 'Network / Creator';
+                    document.getElementById('m-creator').innerText = detail.created_by?.[0]?.name || detail.networks?.[0]?.name || 'Unknown';
+                    
+                    document.getElementById('m-lineage').innerText = "Television Series / Miniseries";
+                }
+
+                document.getElementById('m-platcast-title').innerText = "Lead Cast";
+                const castList = detail.credits?.cast?.slice(0, 6).map(c => c.name).join(', ');
+                document.getElementById('m-platcast-text').innerText = castList || "Cast unannounced.";
+
+                const pop = detail.popularity || 0;
+                const logPop = pop > 0 ? Math.log10(pop) : 0;
+                const logPopMax = Math.log10(5000); 
+                const hypeRawPct = Math.min((logPop / logPopMax) * 100, 100);
+                const hypePercentStr = hypeRawPct.toFixed(1) + '%';
+
+                let hypeLabel;
+                if (hypeRawPct >= 90) hypeLabel = '🔥 VIRAL';
+                else if (hypeRawPct >= 70) hypeLabel = '📈 Massive Buzz';
+                else if (hypeRawPct >= 50) hypeLabel = '⚡ High Interest';
+                else if (hypeRawPct >= 30) hypeLabel = '👀 Growing Interest';
+                else hypeLabel = '🌱 Quietly Watched';
+
+                document.getElementById('m-hype-bar').setAttribute('data-width', hypePercentStr);
+                if(document.getElementById('tab-deepdive').classList.contains('active')) {
+                    document.getElementById('m-hype-bar').style.width = hypePercentStr;
+                }
+                document.getElementById('m-hype-status').innerText = hypeLabel;
+                document.getElementById('m-hype-metric').innerText = `Popularity Index: ${Math.round(pop)}`;
+
+                let delayText = '';
+                const tmdbStatus = detail.status; 
+                const relDateStr = item.date;
+                
+                let relDateObj = null;
+                if (relDateStr && !relDateStr.includes('TBA')) {
+                    const parts = relDateStr.split('-');
+                    if(parts.length === 3) {
+                        relDateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                    } else {
+                        relDateObj = new Date(relDateStr);
+                    }
+                }
+                
+                const today = new Date();
+                today.setHours(0,0,0,0); 
+
+                const statusEmoji = {
+                    'Released': '✅', 'In Production': '🎬', 'Post Production': '✂️',
+                    'Planned': '📋', 'Canceled': '❌', 'Rumored': '🤫',
+                    'Returning Series': '📺', 'Ended': '🏁', 'Airing': '📡',
+                };
+                const emoji = statusEmoji[tmdbStatus] || '📅';
+
+                if (tmdbStatus === 'Canceled') {
+                    delayText = `❌ Canceled — this project has been officially cancelled.`;
+                } else if (tmdbStatus === 'Returning Series') {
+                    if (detail.next_episode_to_air) {
+                        const nextDate = formatSafeDate(detail.next_episode_to_air.air_date);
+                        delayText = `📺 Returning Series — Next episode airs on ${nextDate}.`;
+                    } else if (detail.last_episode_to_air) {
+                        const lastDate = formatSafeDate(detail.last_episode_to_air.air_date);
+                        delayText = `📺 Returning Series — Last episode aired on ${lastDate}. Awaiting next season dates.`;
+                    } else {
+                        delayText = `📺 Returning Series — currently between seasons. Check network for dates.`;
+                    }
+                } else if (relDateObj && relDateObj > today) {
+                    const fmt = formatSafeDate(relDateStr);
+                    delayText = `${emoji} Upcoming — confirmed release/premiere date: ${fmt}. No delays flagged.`;
+                } else if (tmdbStatus === 'Released' || tmdbStatus === 'Ended') {
+                    const fmt = formatSafeDate(relDateStr);
+                    delayText = `✅ Released — aired/premiered on ${fmt}. No delays.`;
+                } else if (!relDateStr || relDateStr.includes('TBA')) {
+                    delayText = `${emoji} ${tmdbStatus || 'Status unknown'} — no release date confirmed yet.`;
+                } else {
+                    delayText = `${emoji} Current production status: ${tmdbStatus || 'Unknown'}. Target date: ${item.date}.`;
+                }
+                document.getElementById('m-delays').innerText = delayText;
+            }
+        } catch (e) {
+            document.getElementById('m-desc').innerText = "Failed to load extra details. Check connection.";
+            document.getElementById('m-platcast-text').innerText = "N/A";
+            document.getElementById('m-lineage').innerText = "N/A";
+            document.getElementById('m-hype-bar').style.width = '0%';
+        }
+    }
+
+    function closeModal(e, force = false) {
+        if (force || e.target === document.getElementById('modal-overlay')) {
+            document.getElementById('modal-overlay').classList.remove('active');
+            document.getElementById('uac-wrapper').classList.remove('modal-open');
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
+        }
+    }
+
+    loadLiveEntertainmentData();
+</script>
