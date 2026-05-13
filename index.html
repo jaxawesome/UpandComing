@@ -67,7 +67,9 @@
     }
     .card:hover { transform: translateY(-8px); box-shadow: 0 10px 25px rgba(108, 92, 231, 0.3); border-color: rgba(108, 92, 231, 0.2); }
 
-    .card-img { width: 100%; height: 250px; object-fit: cover; background-color: #2a2a35; }
+    .card-img-container { width: 100%; height: 250px; overflow: hidden; background-color: #2a2a35; }
+    .card-img { width: 100%; height: 100%; object-fit: cover; }
+    
     .card-content { padding: 1.5rem; display: flex; flex-direction: column; flex-grow: 1; }
     .card-title { margin: 0 0 0.5rem 0; font-size: 1.25rem; }
     .card-meta { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem; flex-grow: 1; }
@@ -126,12 +128,8 @@
     @media (max-width: 768px) {
         #uac-wrapper { padding: 1rem; }
         h1 { font-size: 2.5rem; margin-bottom: 1.5rem; }
-        .controls { flex-wrap: wrap; justify-content: center; border-radius: 20px; }
-        button.toggle-btn { padding: 0.5rem 1rem; font-size: 0.85rem; }
         .grid { grid-template-columns: 1fr; gap: 1.5rem; }
         .modal { padding: 1.5rem; width: 95%; max-height: 90vh; }
-        .modal-title { font-size: 1.8rem; }
-        .modal-stats { grid-template-columns: 1fr; gap: 0.8rem; }
     }
 </style>
 
@@ -259,24 +257,21 @@
             const twoWeeksAgo = new Date();
             twoWeeksAgo.setDate(today.getDate() - 14);
             const twoWeeksAgoFormatted = twoWeeksAgo.toISOString().split('T')[0];
-            const eightWeeksAgo = new Date();
-            eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 60);
-            const eightWeeksAgoFormatted = eightWeeksAgo.toISOString().split('T')[0];
             const nextYear = today.getFullYear() + 2;
 
-            // Staggered Fetches to avoid burst limits
+            // Staggered Fetches (Strategy: Spaced out calls for reliability)
             const moviePages = [];
             for(let i = 1; i <= 4; i++) {
                 const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${twoWeeksAgoFormatted}&sort_by=popularity.desc&page=${i}`).then(r => r.json());
                 moviePages.push(res);
-                await delay(100);
+                await delay(120);
             }
 
             const tvPages = [];
             for(let i = 1; i <= 3; i++) {
                 const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&sort_by=popularity.desc&with_original_language=en&without_genres=10763,10767&page=${i}`).then(r => r.json());
                 tvPages.push(res);
-                await delay(100);
+                await delay(120);
             }
 
             const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc`).then(res => res.json());
@@ -302,7 +297,7 @@
                     id: item.id, type: mediaType, tmdb_api_type: item._tmdb_type,
                     title: item.title || item.name, date: rDate,
                     status: determineStatus(rDate),
-                    perf: item.vote_average ? `${(item.vote_average * 10).toFixed(0)}% Audience Score` : 'TBD',
+                    perf: item.vote_average ? `${(item.vote_average * 10).toFixed(0)}% Score` : 'TBD',
                     image: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : FALLBACK_IMG
                 };
             });
@@ -330,7 +325,7 @@
             renderCards();
         } catch (error) {
             console.error(error);
-            document.getElementById('content-grid').innerHTML = '<div class="loading-text" style="color: #ff7675;">Failed to load data. API might be unreachable.</div>';
+            document.getElementById('content-grid').innerHTML = '<div class="loading-text" style="color: #ff7675;">Failed to load data. Check API keys and connection.</div>';
         }
     }
 
@@ -338,77 +333,118 @@
         const overlay = document.getElementById('modal-overlay');
         switchTab('overview', document.querySelector('.modal-tabs .tab-btn'));
         document.getElementById('m-title').innerText = item.title;
-        document.getElementById('m-desc').innerHTML = '<span class="loader-inline">Scanning...</span>';
+        document.getElementById('m-desc').innerHTML = '<span class="loader-inline">Scanning databases...</span>';
         document.getElementById('m-delays').innerText = "Checking status...";
+        document.getElementById('m-subtitle').innerText = "Genres loading...";
+        document.getElementById('m-type').innerText = item.type.toUpperCase();
+        document.getElementById('m-date').innerText = formatSafeDate(item.date);
+        document.getElementById('m-perf').innerText = item.perf;
+        
         overlay.classList.add('active');
 
         try {
             let detail;
+            const today = new Date();
+
             if (item.type === 'game') {
                 const res = await fetch(`https://api.rawg.io/api/games/${item.id}?key=${RAWG_API_KEY}`);
                 detail = await res.json();
 
-                // RESTORE ALL LINEAGE LOGIC
+                // RESTORE LINEAGE LOGIC
                 const descRaw = (detail.description_raw || '').toLowerCase();
                 const tags = detail.tags?.map(t => t.slug) || [];
-                const KNOWN_REBOOTS = ['fable', 'tomb raider', 'prince of persia', 'alone in the dark', 'perfect dark', 'gothic', 'silent hill 2'];
-                const KNOWN_REMAKES = ['remake', 'remaster', 'definitive edition'];
+                const tagNames = detail.tags?.map(t => t.name?.toLowerCase()) || [];
                 const titleLower = detail.name.toLowerCase();
+                const KNOWN_REBOOTS = ['fable', 'tomb raider', 'prince of persia', 'alone in the dark', 'perfect dark', 'gothic', 'silent hill 2'];
+                const KNOWN_REMAKES = ['remake', 'remaster', 'definitive edition', 'resynced'];
 
-                if (tags.some(t => t.includes('reboot')) || KNOWN_REBOOTS.some(r => titleLower.includes(r))) {
+                if (tags.some(t => t.includes('reboot')) || tagNames.some(t => t.includes('reboot')) || KNOWN_REBOOTS.some(r => titleLower.includes(r))) {
                     document.getElementById('m-lineage').innerText = "Reboot";
-                } else if (tags.some(t => t.includes('remake')) || KNOWN_REMAKES.some(r => titleLower.includes(r))) {
+                } else if (tags.some(t => t.includes('remake')) || tagNames.some(t => t.includes('remake')) || KNOWN_REMAKES.some(r => titleLower.includes(r))) {
                     document.getElementById('m-lineage').innerText = "Remake / Remaster";
                 } else {
-                    document.getElementById('m-lineage').innerText = detail.series_count > 0 ? "Series Entry" : "Original / Standalone";
+                    document.getElementById('m-lineage').innerText = (detail.series_count > 0 || tags.includes('sequel')) ? "Series Entry / Sequel" : "Original / Standalone";
                 }
 
                 // VIBE CHECK & DELAY SCAN
-                const delayKeywords = ['delay', 'postponed', 'pushed back', 'rescheduled', 'late 2026', 'fall 2026'];
+                const delayKeywords = ['delay', 'postponed', 'pushed back', 'rescheduled', 'fall 2026', 'late 2026', '2027'];
                 const hasKeywords = delayKeywords.some(kw => descRaw.includes(kw));
-                const today = new Date();
-                const updatedAgo = detail.updated ? Math.floor((today - new Date(detail.updated)) / (1000 * 60 * 60 * 24)) : 999;
+                const updatedDate = detail.updated ? new Date(detail.updated) : null;
+                const updatedAgo = updatedDate ? Math.floor((today - updatedDate) / (1000 * 60 * 60 * 24)) : 999;
                 const isVibeAlert = updatedAgo <= 5;
 
-                let dText = "";
-                if (hasKeywords && isVibeAlert) dText = `🚨 Potential Delay — Recent keywords and updates detected.`;
-                else if (hasKeywords || isVibeAlert) dText = `🟡 Under Review — Recent activity or keywords found.`;
-                else dText = `🟢 On track — confirmed date: ${formatSafeDate(item.date)}.`;
+                let dStatus = "";
+                const fmtDate = formatSafeDate(item.date);
+                if (hasKeywords && isVibeAlert) dStatus = `🚨 Potential Delay — Recent keywords and database updates detected.`;
+                else if (hasKeywords || isVibeAlert) dStatus = `🟡 Under Review — Recent update or delay keywords found.`;
+                else dStatus = `🟢 On track — confirmed date: ${fmtDate}.`;
                 
-                document.getElementById('m-delays').innerText = dText + (updatedAgo <= 30 ? ` (Updated ${updatedAgo} days ago)` : "");
-                document.getElementById('m-desc').innerText = detail.description_raw || "No description.";
+                document.getElementById('m-delays').innerText = dStatus + (updatedAgo <= 30 ? ` (Listing updated ${updatedAgo} days ago)` : "");
+                document.getElementById('m-subtitle').innerText = detail.genres?.map(g => g.name).join(', ') || 'Various';
+                document.getElementById('m-desc').innerText = detail.description_raw || "No description provided.";
+                document.getElementById('m-creator-label').innerText = "Developer";
                 document.getElementById('m-creator').innerText = detail.developers?.[0]?.name || "Unknown";
+                document.getElementById('m-platcast-title').innerText = "Platforms";
                 document.getElementById('m-platcast-text').innerText = detail.platforms?.map(p => p.platform.name).join(', ') || "N/A";
                 
-                // RESTORE HYPE
+                // RESTORE HYPE BAR
                 const logVal = detail.added > 0 ? Math.log10(detail.added) : 0;
                 const pct = Math.min((logVal / Math.log10(500000)) * 100, 100).toFixed(1) + '%';
-                document.getElementById('m-hype-bar').style.width = pct;
-                document.getElementById('m-hype-status').innerText = detail.added > 5000 ? "🔥 HIGH HYPE" : "🌱 Watch List";
+                document.getElementById('m-hype-bar').setAttribute('data-width', pct);
+                document.getElementById('m-hype-status').innerText = detail.added > 10000 ? "🔥 HIGH HYPE" : "📈 Trending";
                 document.getElementById('m-hype-metric').innerText = `${detail.added?.toLocaleString()} Users Tracking`;
 
             } else {
-                // LAZY LOAD TMDB
+                // RESTORE TMDB MODAL POPULATION
                 const res = await fetch(`https://api.themoviedb.org/3/${item.tmdb_api_type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`);
                 detail = await res.json();
-                document.getElementById('m-desc').innerText = detail.overview || "No synopsis.";
-                document.getElementById('m-creator').innerText = detail.production_companies?.[0]?.name || "Unknown";
+
+                document.getElementById('m-subtitle').innerText = detail.genres?.map(g => g.name).join(', ') || 'Various';
+                document.getElementById('m-desc').innerText = detail.overview || "No synopsis available.";
+                document.getElementById('m-creator-label').innerText = item.tmdb_api_type === 'movie' ? 'Director/Studio' : 'Creator/Network';
+                const creator = item.tmdb_api_type === 'movie' ? (detail.credits?.crew?.find(c => c.job === 'Director')?.name || detail.production_companies?.[0]?.name) : (detail.created_by?.[0]?.name || detail.networks?.[0]?.name);
+                document.getElementById('m-creator').innerText = creator || "Unknown";
+                
+                document.getElementById('m-platcast-title').innerText = "Lead Cast";
                 document.getElementById('m-platcast-text').innerText = detail.credits?.cast?.slice(0, 5).map(c => c.name).join(', ') || "TBA";
-                document.getElementById('m-lineage').innerText = item.tmdb_api_type === 'tv' ? "Television" : "Movie";
-                document.getElementById('m-delays').innerText = `Status: ${detail.status}. Target: ${formatSafeDate(item.date)}.`;
+                
+                document.getElementById('m-lineage').innerText = item.tmdb_api_type === 'tv' ? (detail.number_of_seasons > 1 ? "Returning Series" : "New Series") : (detail.belongs_to_collection ? "Part of a Franchise" : "Standalone Film");
+                
+                // RESTORE TMDB HYPE (Popularity index based)
+                const pop = detail.popularity || 0;
+                const pctPop = Math.min((Math.log10(pop) / Math.log10(5000)) * 100, 100).toFixed(1) + '%';
+                document.getElementById('m-hype-bar').setAttribute('data-width', pctPop);
+                document.getElementById('m-hype-status').innerText = pop > 500 ? "🔥 VIRAL" : "👀 Noticed";
+                document.getElementById('m-hype-metric').innerText = `Popularity Index: ${Math.round(pop)}`;
+                
+                document.getElementById('m-delays').innerText = `Status: ${detail.status}. Target Date: ${formatSafeDate(item.date)}.`;
             }
-        } catch (e) { console.error(e); }
+        } catch (e) { 
+            console.error(e);
+            document.getElementById('m-desc').innerText = "Failed to load additional details.";
+        }
     }
 
     function renderCards() {
         const grid = document.getElementById('content-grid');
         grid.innerHTML = '';
         const filtered = database.filter(i => (currentFilters.type === 'all' || i.type === currentFilters.type) && (currentFilters.status === 'all' || i.status === currentFilters.status));
+        
         filtered.forEach(item => {
             const card = document.createElement('div');
             card.className = 'card';
             card.onclick = () => openModal(item);
-            card.innerHTML = `<div class="card-img" style="background-image: url('${item.image}')"></div><div class="card-content"><h3 class="card-title">${item.title}</h3><div class="card-meta">${item.type.toUpperCase()} &middot; ${item.date}</div><span class="status-badge ${item.status === 'Released' ? 'badge-released' : 'badge-upcoming'}">${item.status}</span></div>`;
+            
+            // Reverted to <img> tag with object-fit for better centering
+            card.innerHTML = `
+                <div class="card-img-container">
+                    <img class="card-img" src="${item.image}" alt="${item.title}" loading="lazy">
+                </div>
+                <div class="card-content">
+                    <h3 class="card-title">${item.title}</h3>
+                    <div class="card-meta">${item.type.toUpperCase()} &middot; ${item.date}</div>
+                    <span class="status-badge ${item.status === 'Released' ? 'badge-released' : 'badge-upcoming'}">${item.status}</span>
+                </div>`;
             grid.appendChild(card);
         });
     }
@@ -426,6 +462,13 @@
         btn.classList.add('active');
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         document.getElementById('tab-' + id).classList.add('active');
+        
+        if(id === 'deepdive') {
+            const bar = document.getElementById('m-hype-bar');
+            const targetWidth = bar.getAttribute('data-width');
+            bar.style.width = '0%';
+            setTimeout(() => { bar.style.width = targetWidth; }, 100);
+        }
     }
 
     function closeModal(e, force = false) {
