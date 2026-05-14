@@ -213,24 +213,47 @@
 </div>
 
 <script>
+    // --- API KEYS ---
     const TMDB_API_KEY = '4fb0a96f5abedde3dfa2c85bb88985a1';
     const RAWG_API_KEY = '27d3fd9ca0664e2b8076c0b0d47c4eed';
+    // Optional: Add a free Gemini key here to auto-write missing game descriptions on the fly
+    const GEMINI_API_KEY = ''; 
+    // ----------------
+
     const FALLBACK_IMG = 'https://placehold.co/600x900/2a2a35/a0a0b0?text=Image+Unavailable';
     const EXCLUDED_GAME_SLUGS = new Set(['cairn', 'reanimal', 'mouse', 'mouse-2']);
     const EXCLUDED_GAME_TITLES = new Set(['some title to ignore']);
+
+    // Hardcoded dictionary to instantly fix completely broken RAWG data for specific games
+    const GAME_FALLBACKS = {
+        "outbound": {
+            desc: "Outbound is an open-world exploration game set in a utopian future where you build, craft, and automate your own camper van to live off the grid.",
+            dev: "Square Glade Games",
+            plats: "PC"
+        },
+        "corsairs - battle of the caribbean": {
+            desc: "Fight for the supremacy of your nation in the Caribbean as a privateer in the service of England, France, or the Netherlands in this tactical naval combat strategy game.",
+            dev: "Fishing Cactus",
+            plats: "PC, PS5, Xbox Series X/S, Switch"
+        }
+    };
 
     const delay = ms => new Promise(res => setTimeout(res, ms));
 
     let database = [];
     let currentFilters = { type: 'all', status: 'all', showType: 'all' };
 
-    // --- AI RECOVERY FEATURE ---
-    async function enrichMissingData(title, type) {
-        const apiKey = ""; // Environment provided
-        const prompt = `Provide a concise 2-sentence description and the primary developer/studio for the ${type} titled "${title}". Focus on its current status in 2026. Return as JSON: {"description": "...", "creator": "...", "extra": "platforms or cast"}`;
+    async function enrichMissingData(title, type, currentText = "") {
+        if (!GEMINI_API_KEY) return null; // Fails gracefully if you haven't added a key yet
         
+        let prompt = `Provide a concise 2-sentence description in English and the primary developer/studio for the ${type} titled "${title}". Focus on its current status in 2026. Return as JSON: {"description": "...", "creator": "...", "extra": "platforms or cast"}`;
+        
+        if (currentText && currentText.length > 50) {
+            prompt = `Translate the following description to English and summarize it in 2 sentences. Also identify the developer/studio and platforms for the ${type} titled "${title}". Description: "${currentText.substring(0, 500)}". Return as JSON: {"description": "...", "creator": "...", "extra": "..."}`;
+        }
+
         try {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -281,21 +304,22 @@
             const twoWeeksAgoFormatted = twoWeeksAgo.toISOString().split('T')[0];
             const nextYear = today.getFullYear() + 2;
 
+            // Added &language=en-US to enforce English data from TMDB
             const moviePages = [];
             for(let i = 1; i <= 4; i++) {
-                const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${twoWeeksAgoFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}`).then(r => r.json());
+                const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${twoWeeksAgoFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}&language=en-US`).then(r => r.json());
                 moviePages.push(res);
                 await delay(120);
             }
 
             const tvPages = [];
             for(let i = 1; i <= 3; i++) {
-                const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_original_language=en&sort_by=popularity.desc&without_genres=10763,10767&page=${i}`).then(r => r.json());
+                const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_original_language=en&sort_by=popularity.desc&without_genres=10763,10767&page=${i}&language=en-US`).then(r => r.json());
                 tvPages.push(res);
                 await delay(120);
             }
 
-            const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc`).then(res => res.json());
+            const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&language=en-US`).then(res => res.json());
             const rawgUpcomingData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${today.toISOString().split('T')[0]},${nextYear}-12-31&ordering=-added&page_size=40`).then(res => res.json());
 
             let combinedTmdbRaw = [
@@ -311,7 +335,7 @@
             for (let i = 0; i < allTvIds.length; i += 10) {
                 const batch = allTvIds.slice(i, i + 10);
                 await Promise.all(batch.map(async id => {
-                    const res = await fetch(`https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}`).catch(() => null);
+                    const res = await fetch(`https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}&language=en-US`).catch(() => null);
                     if (res && res.ok) tvDetailsMap[id] = await res.json();
                 }));
                 await delay(150); 
@@ -364,7 +388,6 @@
                 perf: 'Anticipated', image: item.background_image || FALLBACK_IMG
             }));
 
-            // STRICT RECENCY: Purge ultra-old entries like classic Doctor Who
             const recencyCutoff = new Date();
             recencyCutoff.setHours(0,0,0,0);
             recencyCutoff.setDate(recencyCutoff.getDate() - 45); 
@@ -418,17 +441,26 @@
                 const res = await fetch(`https://api.rawg.io/api/games/${item.id}?key=${RAWG_API_KEY}`);
                 detail = await res.json();
                 
-                // --- SMART RECOVERY FOR INDIE GAMES (OUTBOUND) ---
-                if (!detail.description_raw || detail.description_raw.length < 50) {
-                    const aiData = await enrichMissingData(item.title, 'game');
+                const normName = item.title.toLowerCase();
+                const isFrenchText = detail.description_raw && /\b(pour|dans|le|la|les|et|ou|des|une)\b/i.test(detail.description_raw.substring(0, 50));
+
+                // 1. HARDCODED FALLBACK FOR KNOWN BROKEN DATA
+                if (GAME_FALLBACKS[normName]) {
+                    detail.description_raw = GAME_FALLBACKS[normName].desc;
+                    if (!detail.developers?.length) detail.developers = [{ name: GAME_FALLBACKS[normName].dev }];
+                    if (!detail.platforms?.length) detail.platforms = [{ platform: { name: GAME_FALLBACKS[normName].plats } }];
+                } 
+                // 2. AI ENRICHMENT FOR ANY OTHER EMPTY OR FOREIGN DESCRIPTIONS
+                else if (!detail.description_raw || detail.description_raw.length < 50 || isFrenchText) {
+                    const aiData = await enrichMissingData(item.title, 'game', detail.description_raw);
                     if (aiData) {
                         detail.description_raw = aiData.description + " (AI-Enriched)";
-                        if (!detail.developers?.length) detail.developers = [{ name: aiData.creator }];
-                        if (!detail.platforms?.length) detail.platforms = [{ platform: { name: aiData.extra } }];
+                        if (!detail.developers?.length && aiData.creator) detail.developers = [{ name: aiData.creator }];
+                        if (!detail.platforms?.length && aiData.extra) detail.platforms = [{ platform: { name: aiData.extra } }];
                     }
                 }
 
-                document.getElementById('m-desc').innerText = detail.description_raw || "No description provided.";
+                document.getElementById('m-desc').innerText = detail.description_raw || "No description provided by developers yet.";
                 document.getElementById('m-creator').innerText = detail.developers?.[0]?.name || "Unknown";
                 document.getElementById('m-platcast-text').innerText = detail.platforms?.map(p => p.platform.name).join(', ') || "N/A";
                 document.getElementById('m-subtitle').innerText = detail.genres?.map(g => g.name).join(', ') || 'Various';
@@ -438,6 +470,9 @@
                 const hypePercentStr = hypeRawPct.toFixed(1) + '%';
                 
                 document.getElementById('m-hype-bar').setAttribute('data-width', hypePercentStr);
+                if(document.getElementById('tab-deepdive').classList.contains('active')) {
+                    document.getElementById('m-hype-bar').style.width = hypePercentStr;
+                }
                 document.getElementById('m-hype-status').innerText = detail.added > 10000 ? "🔥 HIGH HYPE" : "📈 Trending";
                 document.getElementById('m-hype-metric').innerText = `${detail.added?.toLocaleString()} Users Tracking`;
 
@@ -448,10 +483,9 @@
                 document.getElementById('m-lineage').innerText = detail.series_count > 0 ? "Series Entry" : "Standalone";
 
             } else {
-                const res = await fetch(`https://api.themoviedb.org/3/${item.tmdb_api_type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`);
+                const res = await fetch(`https://api.themoviedb.org/3/${item.tmdb_api_type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=credits&language=en-US`);
                 detail = await res.json();
 
-                // --- SMART RECOVERY FOR MOVIES ---
                 if (!detail.overview || detail.overview.length < 20) {
                     const aiData = await enrichMissingData(item.title, item.tmdb_api_type);
                     if (aiData) {
@@ -470,6 +504,9 @@
                 const pop = detail.popularity || 0;
                 const pctPop = Math.min((Math.log10(pop) / Math.log10(5000)) * 100, 100).toFixed(1) + '%';
                 document.getElementById('m-hype-bar').setAttribute('data-width', pctPop);
+                if(document.getElementById('tab-deepdive').classList.contains('active')) {
+                    document.getElementById('m-hype-bar').style.width = pctPop;
+                }
                 document.getElementById('m-hype-status').innerText = pop > 500 ? "🔥 VIRAL" : "👀 Noticed";
                 document.getElementById('m-hype-metric').innerText = `Popularity Index: ${Math.round(pop)}`;
                 
@@ -543,3 +580,4 @@
 
     loadLiveEntertainmentData();
 </script>
+
