@@ -213,8 +213,10 @@
 </div>
 
 <script>
-    const TMDB_API_KEY = '4fb0a96f5abedde3dfa2c85bb88985a1'; // Wouldn't make much sense to steal a free key now would it?
-    const RAWG_API_KEY = '27d3fd9ca0664e2b8076c0b0d47c4eed'; // Wouldn't make much sense to steal a free key now would it?
+    // --- API KEYS ---
+    const TMDB_API_KEY = '4fb0a96f5abedde3dfa2c85bb88985a1';
+    const RAWG_API_KEY = '27d3fd9ca0664e2b8076c0b0d47c4eed';
+    // ----------------
 
     const FALLBACK_IMG = 'https://placehold.co/600x900/2a2a35/a0a0b0?text=Image+Unavailable';
     const EXCLUDED_GAME_SLUGS = new Set(['cairn', 'reanimal', 'mouse', 'mouse-2']);
@@ -348,6 +350,27 @@
             const seenGameTitles = new Set();
             const liveGames = (rawgUpcomingData.results || []).filter(g => {
                 if (EXCLUDED_GAME_SLUGS.has(g.slug)) return false;
+
+                // 1. Junk / Placeholder Title Filter
+                const titleLower = (g.name || '').toLowerCase();
+                const isJunk = !g.name || g.name.trim().length < 3 ||
+                               /^(untitled|unknown|placeholder|tbd|tba|test)\b/.test(titleLower) ||
+                               titleLower.includes('untitled ') || titleLower.includes('unknown ');
+                if (isJunk) return false;
+
+                // 2. Far Future & Placeholder Date Filter
+                if (g.released) {
+                    const relDate = new Date(g.released);
+                    const today = new Date();
+                    const daysAway = (relDate - today) / (1000 * 60 * 60 * 24);
+                    
+                    // Filter December 31st placeholders for future years
+                    if (g.released.endsWith('-12-31') && relDate.getFullYear() > today.getFullYear()) return false;
+                    
+                    // Filter anything more than ~18 months out (545 days)
+                    if (daysAway > 545) return false;
+                }
+
                 const norm = normalizeTitle(g.name);
                 if (seenGameTitles.has(norm) || EXCLUDED_GAME_TITLES.has(norm)) return false;
                 seenGameTitles.add(norm);
@@ -534,5 +557,6 @@
 
     loadLiveEntertainmentData();
 </script>
+
 
 
