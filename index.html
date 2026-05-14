@@ -352,22 +352,27 @@
                 if (EXCLUDED_GAME_SLUGS.has(g.slug)) return false;
 
                 // 1. Junk / Placeholder Title Filter
-                const titleLower = (g.name || '').toLowerCase();
-                const isJunk = !g.name || g.name.trim().length < 3 ||
-                               /^(untitled|unknown|placeholder|tbd|tba|test)\b/.test(titleLower) ||
-                               titleLower.includes('untitled ') || titleLower.includes('unknown ');
+                const titleLower = (g.name || '').toLowerCase().trim();
+                const isJunk = titleLower.length < 3 || 
+                               titleLower.includes('untitled') || 
+                               titleLower.includes('unknown') || 
+                               titleLower.includes('placeholder');
                 if (isJunk) return false;
 
-                // 2. Far Future & Placeholder Date Filter
+                // 2. Web Game Filter (Removes browser games like Gerenimot)
+                const platforms = g.platforms?.map(p => p.platform?.name?.toLowerCase()) || [];
+                if (platforms.some(p => p.includes('web'))) return false;
+
+                // 3. Far Future & Placeholder Date Filter
                 if (g.released) {
                     const relDate = new Date(g.released);
                     const today = new Date();
                     const daysAway = (relDate - today) / (1000 * 60 * 60 * 24);
                     
-                    // Filter December 31st placeholders for future years
-                    if (g.released.endsWith('-12-31') && relDate.getFullYear() > today.getFullYear()) return false;
+                    // Any December 31st date in the future is a placeholder
+                    if (g.released.endsWith('-12-31') && relDate > today) return false;
                     
-                    // Filter anything more than ~18 months out (545 days)
+                    // Anything more than ~18 months out (545 days) is too far out
                     if (daysAway > 545) return false;
                 }
 
@@ -557,6 +562,7 @@
 
     loadLiveEntertainmentData();
 </script>
+
 
 
 
