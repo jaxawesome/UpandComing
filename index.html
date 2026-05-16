@@ -272,35 +272,35 @@
     async function loadLiveEntertainmentData() {
         try {
             const today = new Date();
-            const twoWeeksAgo = new Date();
-            twoWeeksAgo.setDate(today.getDate() - 14);
-            const twoWeeksAgoFormatted = twoWeeksAgo.toISOString().split('T')[0];
+            const todayFormatted = today.toISOString().split('T')[0];
             const nextYear = today.getFullYear() + 2;
 
-            // FIX: Grab games from up to 90 days ago so "Released" actually works for recent titles
+            // FIX: Set a strict 60-day window for recent releases
             const pastDate = new Date();
-            pastDate.setDate(today.getDate() - 90);
+            pastDate.setDate(today.getDate() - 60);
             const pastDateFormatted = pastDate.toISOString().split('T')[0];
 
             // Added &language=en-US to enforce English data from TMDB
             const moviePages = [];
             for(let i = 1; i <= 4; i++) {
-                const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${twoWeeksAgoFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}&language=en-US`).then(r => r.json());
+                const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${pastDateFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}&language=en-US`).then(r => r.json());
                 moviePages.push(res);
                 await delay(120);
             }
 
             const tvPages = [];
             for(let i = 1; i <= 3; i++) {
-                const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_original_language=en&sort_by=popularity.desc&without_genres=10763,10767&page=${i}&language=en-US`).then(r => r.json());
+                const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${pastDateFormatted}&with_original_language=en&sort_by=popularity.desc&without_genres=10763,10767&page=${i}&language=en-US`).then(r => r.json());
                 tvPages.push(res);
                 await delay(120);
             }
 
-            const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${twoWeeksAgoFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&language=en-US`).then(res => res.json());
+            const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${pastDateFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&language=en-US`).then(res => res.json());
             
-            // FIX: Updated the 'dates' parameter to use pastDateFormatted instead of today
-            const rawgUpcomingData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${pastDateFormatted},${nextYear}-12-31&ordering=-added&page_size=40`).then(res => res.json());
+            // FIX: Split RAWG into TWO calls so popular recently released games don't get drowned out by popular upcoming games
+            const rawgRecentData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${pastDateFormatted},${todayFormatted}&ordering=-added&page_size=40`).then(res => res.json());
+            const rawgUpcomingData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${todayFormatted},${nextYear}-12-31&ordering=-added&page_size=40`).then(res => res.json());
+            const combinedRawgResults = [...(rawgRecentData.results || []), ...(rawgUpcomingData.results || [])];
 
             let combinedTmdbRaw = [
                 ...moviePages.flatMap(p => p.results || []).map(m => ({...m, _tmdb_type: 'movie'})),
@@ -355,7 +355,7 @@
             });
 
             const seenGameTitles = new Set();
-            const liveGames = (rawgUpcomingData.results || []).filter(g => {
+            const liveGames = combinedRawgResults.filter(g => {
                 if (EXCLUDED_GAME_SLUGS.has(g.slug)) return false;
 
                 // 1. Junk / Placeholder Title Filter
@@ -394,10 +394,10 @@
                 perf: 'Anticipated', image: item.background_image || FALLBACK_IMG
             }));
 
-            // FIX: Bumped the cutoff to 90 days (approx 3 months) to keep Released games recent
+            // FIX: Restrict the final array to the 60 day cutoff so old games drop off
             const recencyCutoff = new Date();
             recencyCutoff.setHours(0,0,0,0);
-            recencyCutoff.setDate(recencyCutoff.getDate() - 90); 
+            recencyCutoff.setDate(recencyCutoff.getDate() - 60); 
 
             database = [...liveMoviesAndShows, ...liveGames].filter(item => {
                 if (!item.date || item.date === 'TBA') return true;
@@ -533,7 +533,7 @@
                 </div>
                 <div class="card-content">
                     <h3 class="card-title">${item.title}</h3>
-                    <!-- FIX: Wrapped item.date with formatSafeDate() so it correctly outputs standard US dates -->
+                    <!-- Wrapped item.date with formatSafeDate() so it correctly outputs standard US dates -->
                     <div class="card-meta">${item.type.toUpperCase()} &middot; ${formatSafeDate(item.date)}</div>
                     <span class="status-badge ${item.status === 'Released' ? 'badge-released' : 'badge-upcoming'}">${item.status}</span>
                 </div>`;
