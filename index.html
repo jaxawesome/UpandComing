@@ -277,9 +277,9 @@
             const twoWeeksAgoFormatted = twoWeeksAgo.toISOString().split('T')[0];
             const nextYear = today.getFullYear() + 2;
 
-            // FIX: Grab games from up to a year ago so "Released" actually works!
+            // FIX: Grab games from up to 90 days ago so "Released" actually works for recent titles
             const pastDate = new Date();
-            pastDate.setFullYear(today.getFullYear() - 1);
+            pastDate.setDate(today.getDate() - 90);
             const pastDateFormatted = pastDate.toISOString().split('T')[0];
 
             // Added &language=en-US to enforce English data from TMDB
@@ -394,10 +394,10 @@
                 perf: 'Anticipated', image: item.background_image || FALLBACK_IMG
             }));
 
-            // FIX: Bumped the cutoff to 365 days so we don't immediately wipe out released items
+            // FIX: Bumped the cutoff to 90 days (approx 3 months) to keep Released games recent
             const recencyCutoff = new Date();
             recencyCutoff.setHours(0,0,0,0);
-            recencyCutoff.setDate(recencyCutoff.getDate() - 365); 
+            recencyCutoff.setDate(recencyCutoff.getDate() - 90); 
 
             database = [...liveMoviesAndShows, ...liveGames].filter(item => {
                 if (!item.date || item.date === 'TBA') return true;
@@ -571,3 +571,4 @@
 
     loadLiveEntertainmentData();
 </script>
+
