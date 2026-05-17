@@ -275,31 +275,36 @@
             const todayFormatted = today.toISOString().split('T')[0];
             const nextYear = today.getFullYear() + 2;
 
-            // FIX: Set a strict 60-day window for recent releases
-            const pastDate = new Date();
-            pastDate.setDate(today.getDate() - 60);
-            const pastDateFormatted = pastDate.toISOString().split('T')[0];
+            // FIX: TV/Movies cycle fast (60 days), but games take forever. 
+            // Let's give games a 2-year shelf life so massive hits like Subnautica 2 don't vanish!
+            const mediaPastDate = new Date();
+            mediaPastDate.setDate(today.getDate() - 60);
+            const mediaPastDateFormatted = mediaPastDate.toISOString().split('T')[0];
+
+            const gamePastDate = new Date();
+            gamePastDate.setFullYear(today.getFullYear() - 2);
+            const gamePastDateFormatted = gamePastDate.toISOString().split('T')[0];
 
             // Added &language=en-US to enforce English data from TMDB
             const moviePages = [];
             for(let i = 1; i <= 4; i++) {
-                const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${pastDateFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}&language=en-US`).then(r => r.json());
+                const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${mediaPastDateFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}&language=en-US`).then(r => r.json());
                 moviePages.push(res);
                 await delay(120);
             }
 
             const tvPages = [];
             for(let i = 1; i <= 3; i++) {
-                const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${pastDateFormatted}&with_original_language=en&sort_by=popularity.desc&without_genres=10763,10767&page=${i}&language=en-US`).then(r => r.json());
+                const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${mediaPastDateFormatted}&with_original_language=en&sort_by=popularity.desc&without_genres=10763,10767&page=${i}&language=en-US`).then(r => r.json());
                 tvPages.push(res);
                 await delay(120);
             }
 
-            const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${pastDateFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&language=en-US`).then(res => res.json());
+            const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${mediaPastDateFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&language=en-US`).then(res => res.json());
             
-            // FIX: Split RAWG into TWO calls so popular recently released games don't get drowned out by popular upcoming games
-            const rawgRecentData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${pastDateFormatted},${todayFormatted}&ordering=-added&page_size=40`).then(res => res.json());
-            const rawgUpcomingData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${todayFormatted},${nextYear}-12-31&ordering=-added&page_size=40`).then(res => res.json());
+            // FIX: Cranked RAWG's page_size to 100 and gave it a 2-year window to pull a massive list of the most popular titles.
+            const rawgRecentData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${gamePastDateFormatted},${todayFormatted}&ordering=-added&page_size=100`).then(res => res.json());
+            const rawgUpcomingData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${todayFormatted},${nextYear}-12-31&ordering=-added&page_size=100`).then(res => res.json());
             const combinedRawgResults = [...(rawgRecentData.results || []), ...(rawgUpcomingData.results || [])];
 
             let combinedTmdbRaw = [
@@ -394,16 +399,16 @@
                 perf: 'Anticipated', image: item.background_image || FALLBACK_IMG
             }));
 
-            // FIX: Restrict the final array to the 60 day cutoff so old games drop off
-            const recencyCutoff = new Date();
-            recencyCutoff.setHours(0,0,0,0);
-            recencyCutoff.setDate(recencyCutoff.getDate() - 60); 
-
+            // FIX: Apply the correct cutoffs based on media type.
             database = [...liveMoviesAndShows, ...liveGames].filter(item => {
                 if (!item.date || item.date === 'TBA') return true;
                 const parts = item.date.split('-');
                 let itemDate = parts.length === 3 ? new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)) : new Date(item.date);
-                return itemDate >= recencyCutoff;
+                
+                if (item.type === 'game') {
+                    return itemDate >= gamePastDate; // Games get 2 years
+                }
+                return itemDate >= mediaPastDate; // Movies/Shows get 60 days
             }).sort((a, b) => {
                 if (a.status === 'Upcoming' && b.status !== 'Upcoming') return -1;
                 if (a.status !== 'Upcoming' && b.status === 'Upcoming') return 1;
@@ -571,4 +576,5 @@
 
     loadLiveEntertainmentData();
 </script>
+
 
