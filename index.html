@@ -295,36 +295,42 @@
             mediaPastDate.setDate(today.getDate() - 60);
             const mediaPastDateFormatted = mediaPastDate.toISOString().split('T')[0];
 
-            // FIX: Set Game cutoff window back down to 45 days
+            // FIX: Set Game cutoff window down to ~3.5 weeks (25 days)
             const gamePastDate = new Date();
-            gamePastDate.setDate(today.getDate() - 45); 
+            gamePastDate.setDate(today.getDate() - 25); 
             const gamePastDateFormatted = gamePastDate.toISOString().split('T')[0];
 
             // Added &language=en-US to enforce English data from TMDB
             const moviePages = [];
-            for(let i = 1; i <= 4; i++) {
+            for(let i = 1; i <= 6; i++) { // Increased to 6 pages
                 const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${mediaPastDateFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}&language=en-US`).then(r => r.json());
                 moviePages.push(res);
                 await delay(120);
             }
 
             const tvPages = [];
-            for(let i = 1; i <= 3; i++) {
+            for(let i = 1; i <= 5; i++) { // Increased to 5 pages
                 const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${mediaPastDateFormatted}&with_original_language=en&sort_by=popularity.desc&without_genres=10763,10767&page=${i}&language=en-US`).then(r => r.json());
                 tvPages.push(res);
                 await delay(120);
             }
 
-            const animeTvData = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${mediaPastDateFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&language=en-US`).then(res => res.json());
+            const animePages = [];
+            for(let i = 1; i <= 2; i++) { // Increased to 2 pages
+                const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${mediaPastDateFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&language=en-US&page=${i}`).then(res => res.json());
+                animePages.push(res);
+                await delay(120);
+            }
             
             const rawgRecentData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${gamePastDateFormatted},${todayFormatted}&ordering=-added&page_size=100`).then(res => res.json());
-            const rawgUpcomingData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${todayFormatted},${nextYear}-12-31&ordering=-added&page_size=100`).then(res => res.json());
-            const combinedRawgResults = [...(rawgRecentData.results || []), ...(rawgUpcomingData.results || [])];
+            const rawgUpcomingData1 = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${todayFormatted},${nextYear}-12-31&ordering=-added&page_size=100&page=1`).then(res => res.json());
+            const rawgUpcomingData2 = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${todayFormatted},${nextYear}-12-31&ordering=-added&page_size=100&page=2`).then(res => res.json());
+            const combinedRawgResults = [...(rawgRecentData.results || []), ...(rawgUpcomingData1.results || []), ...(rawgUpcomingData2.results || [])];
 
             let combinedTmdbRaw = [
                 ...moviePages.flatMap(p => p.results || []).map(m => ({...m, _tmdb_type: 'movie'})),
                 ...tvPages.flatMap(p => p.results || []).map(t => ({...t, _tmdb_type: 'tv'})),
-                ...(animeTvData.results || []).map(a => ({...a, _tmdb_type: 'tv', _is_anime: true}))
+                ...(animePages.flatMap(p => p.results || [])).map(a => ({...a, _tmdb_type: 'tv', _is_anime: true}))
             ];
 
             const allTvIds = Array.from(new Set(combinedTmdbRaw.filter(i => i._tmdb_type === 'tv').map(i => i.id)));
@@ -415,13 +421,19 @@
                 let itemDate = parts.length === 3 ? new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)) : new Date(item.date);
                 
                 if (item.type === 'game') {
-                    return itemDate >= gamePastDate; // Games get 45 days
+                    return itemDate >= gamePastDate; // Games get 25 days
                 }
                 return itemDate >= mediaPastDate; // Movies/Shows get 60 days
             }).sort((a, b) => {
                 if (a.status === 'Upcoming' && b.status !== 'Upcoming') return -1;
                 if (a.status !== 'Upcoming' && b.status === 'Upcoming') return 1;
-                return new Date(a.date) - new Date(b.date);
+                
+                // Both Upcoming: Sort closest date first (Ascending)
+                if (a.status === 'Upcoming') {
+                    return new Date(a.date) - new Date(b.date);
+                }
+                // Both Released: Sort most recent date first (Descending)
+                return new Date(b.date) - new Date(a.date);
             });
 
             renderCards();
@@ -540,7 +552,26 @@
             return typeM && statusM && showM;
         });
         
-        filtered.forEach(item => {
+        // Dynamically scale limit based on filters
+        let displayLimit = 60; // Base limit
+        if (currentFilters.type !== 'all') displayLimit += 90;
+        if (currentFilters.status !== 'all') displayLimit += 90;
+        if (currentFilters.type === 'show' && currentFilters.showType !== 'all') displayLimit += 60;
+
+        let itemsToRender = [];
+        
+        if (currentFilters.status === 'all') {
+            // Split 70% Upcoming / 30% Released so released items don't get completely buried
+            const upcoming = filtered.filter(i => i.status === 'Upcoming');
+            const released = filtered.filter(i => i.status === 'Released');
+            const upLimit = Math.floor(displayLimit * 0.7);
+            const relLimit = displayLimit - upLimit;
+            itemsToRender = [...upcoming.slice(0, upLimit), ...released.slice(0, relLimit)];
+        } else {
+            itemsToRender = filtered.slice(0, displayLimit);
+        }
+
+        itemsToRender.forEach(item => {
             const card = document.createElement('div');
             card.className = 'card';
             card.onclick = () => openModal(item);
@@ -555,6 +586,16 @@
                 </div>`;
             grid.appendChild(card);
         });
+
+        // Add a "Show More" style text at the bottom if items are hidden
+        if (filtered.length > itemsToRender.length) {
+            const moreDiv = document.createElement('div');
+            moreDiv.className = 'loading-text';
+            moreDiv.style.gridColumn = '1 / -1';
+            moreDiv.style.paddingTop = '0.5rem';
+            moreDiv.innerHTML = `Showing top ${itemsToRender.length} results. <br><span style="font-size:0.9rem; color:var(--text-muted);">(${filtered.length - itemsToRender.length} more available. Select a specific category or status filter to reveal them!)</span>`;
+            grid.appendChild(moreDiv);
+        }
     }
 
     function setFilter(cat, val, btn) {
@@ -587,4 +628,5 @@
 
     loadLiveEntertainmentData();
 </script>
+
 
