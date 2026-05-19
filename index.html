@@ -221,6 +221,9 @@
     const FALLBACK_IMG = 'https://placehold.co/600x900/2a2a35/a0a0b0?text=Image+Unavailable';
     const EXCLUDED_GAME_SLUGS = new Set(['cairn', 'reanimal', 'mouse', 'mouse-2']);
     const EXCLUDED_GAME_TITLES = new Set(['some title to ignore']);
+    
+    // TITAN GAMES: Massive releases that bypass the strict Recency Cutoff
+    const TITAN_GAME_SLUGS = new Set(['subnautica-2', 'grand-theft-auto-vi']);
 
     // Hardcoded dictionary to instantly fix completely broken RAWG data for specific games
     const GAME_FALLBACKS = {
@@ -260,8 +263,6 @@
         return dateString;
     }
 
-    // FIX: Replaced JS Date parsing with a strict integer comparison.
-    // This perfectly evaluates dates without any timezone shifts!
     function determineStatus(dateString) {
         if (!dateString || dateString.includes('TBA')) return 'Upcoming';
         const parts = dateString.split('-');
@@ -295,37 +296,42 @@
             mediaPastDate.setDate(today.getDate() - 60);
             const mediaPastDateFormatted = mediaPastDate.toISOString().split('T')[0];
 
-            // FIX: Set Game cutoff window down to ~3.5 weeks (25 days)
             const gamePastDate = new Date();
             gamePastDate.setDate(today.getDate() - 25); 
             const gamePastDateFormatted = gamePastDate.toISOString().split('T')[0];
 
-            // Added &language=en-US to enforce English data from TMDB
             const moviePages = [];
-            for(let i = 1; i <= 6; i++) { // Increased to 6 pages
+            for(let i = 1; i <= 6; i++) {
                 const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=${mediaPastDateFormatted}&with_original_language=en&sort_by=popularity.desc&page=${i}&language=en-US`).then(r => r.json());
                 moviePages.push(res);
                 await delay(120);
             }
 
             const tvPages = [];
-            for(let i = 1; i <= 5; i++) { // Increased to 5 pages
+            for(let i = 1; i <= 5; i++) {
                 const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${mediaPastDateFormatted}&with_original_language=en&sort_by=popularity.desc&without_genres=10763,10767&page=${i}&language=en-US`).then(r => r.json());
                 tvPages.push(res);
                 await delay(120);
             }
 
             const animePages = [];
-            for(let i = 1; i <= 2; i++) { // Increased to 2 pages
+            for(let i = 1; i <= 2; i++) {
                 const res = await fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&air_date.gte=${mediaPastDateFormatted}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&language=en-US&page=${i}`).then(res => res.json());
                 animePages.push(res);
                 await delay(120);
             }
             
+            // Explicitly force fetch any Titan games so they are guaranteed to exist before filters
+            const extraGamesPromises = Array.from(TITAN_GAME_SLUGS).map(slug => 
+                 fetch(`https://api.rawg.io/api/games/${slug}?key=${RAWG_API_KEY}`).then(r => r.ok ? r.json() : null).catch(()=>null)
+            );
+            const extraGames = (await Promise.all(extraGamesPromises)).filter(g => g !== null);
+
             const rawgRecentData = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${gamePastDateFormatted},${todayFormatted}&ordering=-added&page_size=100`).then(res => res.json());
             const rawgUpcomingData1 = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${todayFormatted},${nextYear}-12-31&ordering=-added&page_size=100&page=1`).then(res => res.json());
             const rawgUpcomingData2 = await fetch(`https://api.rawg.io/api/games?key=${RAWG_API_KEY}&dates=${todayFormatted},${nextYear}-12-31&ordering=-added&page_size=100&page=2`).then(res => res.json());
-            const combinedRawgResults = [...(rawgRecentData.results || []), ...(rawgUpcomingData1.results || []), ...(rawgUpcomingData2.results || [])];
+            
+            const combinedRawgResults = [...(rawgRecentData.results || []), ...(rawgUpcomingData1.results || []), ...(rawgUpcomingData2.results || []), ...extraGames];
 
             let combinedTmdbRaw = [
                 ...moviePages.flatMap(p => p.results || []).map(m => ({...m, _tmdb_type: 'movie'})),
@@ -362,7 +368,6 @@
                     } else if (tvD.last_episode_to_air?.air_date) {
                         rDate = tvD.last_episode_to_air.air_date;
                     }
-                    // FIX: Catch anime logic to accurately classify JJK and others as returning series.
                     const seasons = (tvD.seasons || []).filter(s => s.season_number > 0).length;
                     const eps = tvD.number_of_episodes || 0;
                     isReturning = seasons > 1 || eps > 24 || (item.title || item.name || "").toLowerCase().includes('jujutsu');
@@ -371,12 +376,17 @@
                 let mediaType = item._tmdb_type === 'tv' ? 'show' : 'movie';
                 if (item._is_anime || (item.original_language === 'ja' && item.genre_ids?.includes(16))) mediaType = 'anime';
 
+                // Ensure vote count is reasonably high before declaring a 100% score
+                const voteCount = item.vote_count || 0;
+                const score = item.vote_average ? (item.vote_average * 10).toFixed(0) : 0;
+                const perfText = (voteCount > 10 && score > 0) ? `${score}% Score` : 'TBD';
+
                 return {
                     id: item.id, type: mediaType, tmdb_api_type: item._tmdb_type,
                     showCategory: isReturning ? 'returning' : 'original',
                     title: item.title || item.name, date: rDate,
                     status: determineStatus(rDate),
-                    perf: item.vote_average ? `${(item.vote_average * 10).toFixed(0)}% Score` : 'TBD',
+                    perf: perfText,
                     image: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : FALLBACK_IMG
                 };
             });
@@ -386,11 +396,20 @@
                 if (EXCLUDED_GAME_SLUGS.has(g.slug)) return false;
 
                 const titleLower = (g.name || '').toLowerCase().trim();
+                
+                // NEW: Strict content filter to remove bizarre/NSFW visual novels or spam
                 const isJunk = titleLower.length < 3 || 
                                titleLower.includes('untitled') || 
                                titleLower.includes('unknown') || 
-                               titleLower.includes('placeholder');
+                               titleLower.includes('placeholder') ||
+                               titleLower.includes('femboy') ||
+                               titleLower.includes('hentai') ||
+                               titleLower.includes('porn') ||
+                               titleLower.includes('sex');
                 if (isJunk) return false;
+
+                const tags = g.tags?.map(t => t.slug) || [];
+                if (tags.some(t => ['nsfw', 'adult', 'erotism', 'sexual-content', 'hentai'].includes(t))) return false;
 
                 const platforms = g.platforms?.map(p => p.platform?.name?.toLowerCase()) || [];
                 if (platforms.some(p => p.includes('web'))) return false;
@@ -401,7 +420,7 @@
                     const daysAway = (relDate - today) / (1000 * 60 * 60 * 24);
                     
                     if (g.released.endsWith('-12-31') && relDate > today) return false;
-                    if (daysAway > 545) return false;
+                    if (daysAway > 545 && !TITAN_GAME_SLUGS.has(g.slug)) return false;
                 }
 
                 const norm = normalizeTitle(g.name);
@@ -417,6 +436,10 @@
 
             database = [...liveMoviesAndShows, ...liveGames].filter(item => {
                 if (!item.date || item.date === 'TBA') return true;
+                
+                // TITAN BYPASS: Do not let strict 25-day cutoff throw out massive highly requested games
+                if (item.type === 'game' && TITAN_GAME_SLUGS.has(item.slug)) return true;
+
                 const parts = item.date.split('-');
                 let itemDate = parts.length === 3 ? new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)) : new Date(item.date);
                 
@@ -501,7 +524,12 @@
                 const updatedAgo = detail.updated ? Math.floor((today - new Date(detail.updated)) / (1000 * 60 * 60 * 24)) : 999;
                 const releaseDateStr = detail.released || item.date;
                 const fmtDate = formatSafeDate(releaseDateStr);
-                document.getElementById('m-delays').innerText = (updatedAgo <= 5 ? "🚨 Recent activity detected." : "🟢 On track.") + ` Date: ${fmtDate}`;
+                
+                // Adjusted emoji to display ⏳ for Upcoming titles instead of 🟢
+                const statusIcon = item.status === 'Upcoming' ? '⏳' : '✅';
+                const statusText = item.status === 'Upcoming' ? 'On track.' : 'Released.';
+                document.getElementById('m-delays').innerText = (updatedAgo <= 5 ? "🚨 Recent activity detected. " : `${statusIcon} ${statusText} `) + `Date: ${fmtDate}`;
+                
                 document.getElementById('m-lineage').innerText = detail.series_count > 0 ? "Series Entry" : "Standalone";
 
             } else {
@@ -513,7 +541,6 @@
                 document.getElementById('m-creator-label').innerText = item.tmdb_api_type === 'movie' ? 'Director/Studio' : 'Creator/Network';
                 document.getElementById('m-creator').innerText = item.tmdb_api_type === 'movie' ? (detail.credits?.crew?.find(c => c.job === 'Director')?.name || detail.production_companies?.[0]?.name) : (detail.created_by?.[0]?.name || detail.networks?.[0]?.name);
                 
-                // FIX: Fallbacks inside the deep dive so the "Lineage" tab shows JJK as Returning
                 const isReturning = detail.number_of_seasons > 1 || detail.number_of_episodes > 24 || (item.title || "").toLowerCase().includes('jujutsu');
                 document.getElementById('m-lineage').innerText = item.tmdb_api_type === 'tv' ? (isReturning ? "Returning Series" : "New Series") : (detail.belongs_to_collection ? "Part of a Franchise" : "Standalone Film");
                 
@@ -528,10 +555,10 @@
                 document.getElementById('m-hype-status').innerText = pop > 500 ? "🔥 VIRAL" : "👀 Noticed";
                 document.getElementById('m-hype-metric').innerText = `Popularity Index: ${Math.round(pop)}`;
                 
-                // FIX: The Modal Delays text is now directly locked to item.status. No unsync possible.
                 const activeDate = document.getElementById('m-date').innerText;
+                // Adjusted emoji to display ⏳ for Upcoming titles
                 if (item.status === 'Upcoming') {
-                    document.getElementById('m-delays').innerText = `🟢 Upcoming — Confirmed date: ${activeDate}.`;
+                    document.getElementById('m-delays').innerText = `⏳ Upcoming — Confirmed date: ${activeDate}.`;
                 } else {
                     document.getElementById('m-delays').innerText = `✅ Released — Available as of ${activeDate}.`;
                 }
@@ -552,8 +579,7 @@
             return typeM && statusM && showM;
         });
         
-        // Dynamically scale limit based on filters
-        let displayLimit = 60; // Base limit
+        let displayLimit = 60; 
         if (currentFilters.type !== 'all') displayLimit += 90;
         if (currentFilters.status !== 'all') displayLimit += 90;
         if (currentFilters.type === 'show' && currentFilters.showType !== 'all') displayLimit += 60;
@@ -561,7 +587,6 @@
         let itemsToRender = [];
         
         if (currentFilters.status === 'all') {
-            // Split 70% Upcoming / 30% Released so released items don't get completely buried
             const upcoming = filtered.filter(i => i.status === 'Upcoming');
             const released = filtered.filter(i => i.status === 'Released');
             const upLimit = Math.floor(displayLimit * 0.7);
@@ -587,7 +612,6 @@
             grid.appendChild(card);
         });
 
-        // Add a "Show More" style text at the bottom if items are hidden
         if (filtered.length > itemsToRender.length) {
             const moreDiv = document.createElement('div');
             moreDiv.className = 'loading-text';
@@ -628,5 +652,4 @@
 
     loadLiveEntertainmentData();
 </script>
-
 
