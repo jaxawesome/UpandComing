@@ -253,12 +253,14 @@
         return t.trim();
     }
 
+    // FIX #1: The Ultimate JavaScript Timezone Bug fix.
+    // Forces the parsed string to UTC Noon to guarantee it never rolls backward regardless of user timezone.
     function formatSafeDate(dateString) {
         if (!dateString || dateString.includes('TBA')) return dateString;
-        const parts = dateString.split('-');
-        if (parts.length === 3) {
-            const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-            return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        const parts = dateString.split('T')[0].split('-');
+        if (parts.length >= 3) {
+            const d = new Date(Date.UTC(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0));
+            return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
         }
         return dateString;
     }
@@ -321,7 +323,6 @@
                 await delay(120);
             }
             
-            // Explicitly force fetch any Titan games so they are guaranteed to exist before filters
             const extraGamesPromises = Array.from(TITAN_GAME_SLUGS).map(slug => 
                  fetch(`https://api.rawg.io/api/games/${slug}?key=${RAWG_API_KEY}`).then(r => r.ok ? r.json() : null).catch(()=>null)
             );
@@ -342,12 +343,28 @@
             const allTvIds = Array.from(new Set(combinedTmdbRaw.filter(i => i._tmdb_type === 'tv').map(i => i.id)));
             const tvDetailsMap = {};
             
-            document.querySelector('.loading-text').innerText = "Syncing live schedules...";
+            // FIX #2: Extract all Movie IDs so we can bypass TMDB's "Wednesday European Premiere" dates
+            // and strictly grab the actual United States release dates!
+            const allMovieIds = Array.from(new Set(combinedTmdbRaw.filter(i => i._tmdb_type === 'movie').map(i => i.id)));
+            const movieDetailsMap = {};
+            
+            document.querySelector('.loading-text').innerText = "Syncing live schedules & US release dates...";
+            
             for (let i = 0; i < allTvIds.length; i += 10) {
                 const batch = allTvIds.slice(i, i + 10);
                 await Promise.all(batch.map(async id => {
                     const res = await fetch(`https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}&language=en-US`).catch(() => null);
                     if (res && res.ok) tvDetailsMap[id] = await res.json();
+                }));
+                await delay(150); 
+            }
+
+            // Loop and fetch movie details specifically for accurate regional dates
+            for (let i = 0; i < allMovieIds.length; i += 10) {
+                const batch = allMovieIds.slice(i, i + 10);
+                await Promise.all(batch.map(async id => {
+                    const res = await fetch(`https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}&append_to_response=release_dates&language=en-US`).catch(() => null);
+                    if (res && res.ok) movieDetailsMap[id] = await res.json();
                 }));
                 await delay(150); 
             }
@@ -371,12 +388,21 @@
                     const seasons = (tvD.seasons || []).filter(s => s.season_number > 0).length;
                     const eps = tvD.number_of_episodes || 0;
                     isReturning = seasons > 1 || eps > 24 || (item.title || item.name || "").toLowerCase().includes('jujutsu');
+                } else if (item._tmdb_type === 'movie' && movieDetailsMap[item.id]) {
+                    // Extract proper US release date instead of International Premiere date
+                    const mD = movieDetailsMap[item.id];
+                    const usReleaseData = mD.release_dates?.results?.find(r => r.iso_3166_1 === 'US');
+                    if (usReleaseData && usReleaseData.release_dates?.length > 0) {
+                        const theatrical = usReleaseData.release_dates.find(r => r.type === 3) || usReleaseData.release_dates[0];
+                        if (theatrical.release_date) {
+                            rDate = theatrical.release_date.split('T')[0];
+                        }
+                    }
                 }
 
                 let mediaType = item._tmdb_type === 'tv' ? 'show' : 'movie';
                 if (item._is_anime || (item.original_language === 'ja' && item.genre_ids?.includes(16))) mediaType = 'anime';
 
-                // Ensure vote count is reasonably high before declaring a 100% score
                 const voteCount = item.vote_count || 0;
                 const score = item.vote_average ? (item.vote_average * 10).toFixed(0) : 0;
                 const perfText = (voteCount > 10 && score > 0) ? `${score}% Score` : 'TBD';
@@ -397,7 +423,6 @@
 
                 const titleLower = (g.name || '').toLowerCase().trim();
                 
-                // NEW: Strict content filter to remove bizarre/NSFW visual novels or spam
                 const isJunk = titleLower.length < 3 || 
                                titleLower.includes('untitled') || 
                                titleLower.includes('unknown') || 
@@ -437,25 +462,22 @@
             database = [...liveMoviesAndShows, ...liveGames].filter(item => {
                 if (!item.date || item.date === 'TBA') return true;
                 
-                // TITAN BYPASS: Do not let strict 25-day cutoff throw out massive highly requested games
                 if (item.type === 'game' && TITAN_GAME_SLUGS.has(item.slug)) return true;
 
                 const parts = item.date.split('-');
                 let itemDate = parts.length === 3 ? new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)) : new Date(item.date);
                 
                 if (item.type === 'game') {
-                    return itemDate >= gamePastDate; // Games get 25 days
+                    return itemDate >= gamePastDate; 
                 }
-                return itemDate >= mediaPastDate; // Movies/Shows get 60 days
+                return itemDate >= mediaPastDate;
             }).sort((a, b) => {
                 if (a.status === 'Upcoming' && b.status !== 'Upcoming') return -1;
                 if (a.status !== 'Upcoming' && b.status === 'Upcoming') return 1;
                 
-                // Both Upcoming: Sort closest date first (Ascending)
                 if (a.status === 'Upcoming') {
                     return new Date(a.date) - new Date(b.date);
                 }
-                // Both Released: Sort most recent date first (Descending)
                 return new Date(b.date) - new Date(a.date);
             });
 
@@ -497,8 +519,6 @@
                 detail = await res.json();
                 
                 const normName = item.title.toLowerCase();
-                const isFrenchText = detail.description_raw && /\b(pour|dans|le|la|les|et|ou|des|une)\b/i.test(detail.description_raw.substring(0, 50));
-
                 if (GAME_FALLBACKS[normName]) {
                     detail.description_raw = GAME_FALLBACKS[normName].desc;
                     if (!detail.developers?.length) detail.developers = [{ name: GAME_FALLBACKS[normName].dev }];
@@ -525,7 +545,6 @@
                 const releaseDateStr = detail.released || item.date;
                 const fmtDate = formatSafeDate(releaseDateStr);
                 
-                // Adjusted emoji to display ⏳ for Upcoming titles instead of 🟢
                 const statusIcon = item.status === 'Upcoming' ? '⏳' : '✅';
                 const statusText = item.status === 'Upcoming' ? 'On track.' : 'Released.';
                 document.getElementById('m-delays').innerText = (updatedAgo <= 5 ? "🚨 Recent activity detected. " : `${statusIcon} ${statusText} `) + `Date: ${fmtDate}`;
@@ -556,7 +575,6 @@
                 document.getElementById('m-hype-metric').innerText = `Popularity Index: ${Math.round(pop)}`;
                 
                 const activeDate = document.getElementById('m-date').innerText;
-                // Adjusted emoji to display ⏳ for Upcoming titles
                 if (item.status === 'Upcoming') {
                     document.getElementById('m-delays').innerText = `⏳ Upcoming — Confirmed date: ${activeDate}.`;
                 } else {
@@ -600,6 +618,8 @@
             const card = document.createElement('div');
             card.className = 'card';
             card.onclick = () => openModal(item);
+            
+            // FIX #3: Added formatSafeDate() back in so the US-formatted string is printed!
             card.innerHTML = `
                 <div class="card-img-container">
                     <img class="card-img" src="${item.image}" alt="${item.title}" loading="lazy" onerror="this.src='${FALLBACK_IMG}'">
